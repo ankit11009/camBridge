@@ -1,0 +1,79 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  cameras      Camera[]
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+enum PluginType {
+  MOCK
+  RTSP
+  ONVIF
+}
+
+enum CameraStatus {
+  UNKNOWN
+  CONNECTING
+  CONNECTED
+  DISCONNECTED
+  ERROR
+}
+
+model Camera {
+  id               String       @id @default(uuid())
+  owner            User         @relation(fields: [ownerId], references: [id])
+  ownerId          String
+  name             String
+  pluginType       PluginType
+  connectionConfig Json // encrypted sensitive fields (e.g. rtspUrl, credentials) before write
+  status           CameraStatus @default(UNKNOWN)
+  lastSeenAt       DateTime?
+  events           Event[]
+  recordings       Recording[]
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+}
+
+enum EventType {
+  STATUS
+  MOTION
+  DETECTION
+}
+
+model Event {
+  id        String    @id @default(uuid())
+  camera    Camera    @relation(fields: [cameraId], references: [id])
+  cameraId  String
+  type      EventType
+  payload   Json
+  createdAt DateTime  @default(now())
+
+  @@index([cameraId, createdAt])
+}
+
+enum RecordingTrigger {
+  MANUAL
+  EVENT
+}
+
+model Recording {
+  id          String           @id @default(uuid())
+  camera      Camera           @relation(fields: [cameraId], references: [id])
+  cameraId    String
+  startedAt   DateTime
+  endedAt     DateTime?
+  filePath    String
+  triggeredBy RecordingTrigger
+  createdAt   DateTime         @default(now())
+}
