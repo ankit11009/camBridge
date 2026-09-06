@@ -1,0 +1,59 @@
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Patch,
+  Param,
+  Delete,
+  UseGuards,
+  HttpCode,
+  HttpStatus,
+} from '@nestjs/common';
+import { CamerasService } from './cameras.service';
+import { CreateCameraDto } from './dto/create-camera.dto';
+import { UpdateCameraDto } from './dto/update-camera.dto';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
+
+@Controller('cameras')
+@UseGuards(JwtAuthGuard)
+export class CamerasController {
+  constructor(private readonly camerasService: CamerasService) {}
+
+  @Post()
+  async create(
+    @CurrentUser('userId') userId: string,
+    @Body() createCameraDto: CreateCameraDto,
+  ) {
+    return this.camerasService.create(userId, createCameraDto);
+  }
+
+  @Get()
+  async findAll(@CurrentUser('userId') userId: string) {
+    return this.camerasService.findAll(userId);
+  }
+
+  @Get(':id')
+  async findOne(
+    @CurrentUser('userId') userId: string,
+    @Param('id') id: string,
+  ) {
+    return this.camerasService.findOne(userId, id);
+  }
+
+  @Patch(':id')
+  async update(
+    @CurrentUser('userId') userId: string,
+    @Param('id') id: string,
+    @Body() updateCameraDto: UpdateCameraDto,
+  ) {
+    return this.camerasService.update(userId, id, updateCameraDto);
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.OK)
+  async remove(@CurrentUser('userId') userId: string, @Param('id') id: string) {
+    return this.camerasService.remove(userId, id);
+  }
+}
