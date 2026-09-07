@@ -3,6 +3,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { camerasApi, Camera } from '../api/cameras.api';
 import { CameraStatusBadge } from '../components/CameraStatusBadge';
+import { LiveVideoPlayer } from '../components/LiveVideoPlayer';
 import { useCameraSocket } from '../hooks/useCameraSocket';
 import {
   ArrowLeft,
@@ -45,6 +46,13 @@ export function CameraDetailPage() {
     enabled: !!id,
   });
 
+  const { data: streamData } = useQuery({
+    queryKey: ['camera-stream', id],
+    queryFn: () => camerasApi.getStreamSource(id!),
+    enabled: !!id && camera?.status === 'CONNECTED',
+    refetchInterval: false,
+  });
+
   const updateMutation = useMutation({
     mutationFn: () => camerasApi.update(id!, { name: name.trim() }),
     onSuccess: () => {
@@ -65,6 +73,7 @@ export function CameraDetailPage() {
         if (!old) return old;
         return { ...old, status: res.status };
       });
+      queryClient.invalidateQueries({ queryKey: ['camera-stream', id] });
       queryClient.invalidateQueries({ queryKey: ['cameras'] });
     },
     onError: (err: any) => {
@@ -79,6 +88,7 @@ export function CameraDetailPage() {
         if (!old) return old;
         return { ...old, status: res.status };
       });
+      queryClient.invalidateQueries({ queryKey: ['camera-stream', id] });
       queryClient.invalidateQueries({ queryKey: ['cameras'] });
     },
     onError: (err: any) => {
@@ -216,6 +226,24 @@ export function CameraDetailPage() {
             <span>{errorMsg}</span>
           </div>
         )}
+
+        {/* Live Stream View */}
+        <div className="space-y-2.5">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+              Live Video Stream
+            </h2>
+            {camera.status === 'CONNECTED' && (
+              <span className="text-[11px] text-emerald-400 font-mono">Transcoding HLS Active</span>
+            )}
+          </div>
+          <LiveVideoPlayer
+            cameraId={camera.id}
+            cameraStatus={camera.status}
+            streamSource={streamData?.streamSource}
+            onRetry={() => connectMutation.mutate()}
+          />
+        </div>
 
         {/* Edit Form */}
         <form onSubmit={handleSave} className="space-y-4">

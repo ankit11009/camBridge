@@ -7,6 +7,7 @@ import { AuthModule } from './auth/auth.module';
 import { CamerasModule } from './cameras/cameras.module';
 import { PluginManagerModule } from './plugins/plugin-manager.module';
 import { EventsModule } from './events/events.module';
+import { StreamingModule } from './streaming/streaming.module';
 import { HealthModule } from './health/health.module';
 
 @Module({
@@ -19,6 +20,7 @@ import { HealthModule } from './health/health.module';
     CryptoModule,
     UsersModule,
     AuthModule,
+    StreamingModule,
     PluginManagerModule,
     EventsModule,
     CamerasModule,

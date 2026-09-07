@@ -82,4 +82,12 @@ export class CamerasController {
   ) {
     return this.camerasService.getStatus(userId, id);
   }
+
+  @Get(':id/stream')
+  async getStream(
+    @CurrentUser('userId') userId: string,
+    @Param('id') id: string,
+  ) {
+    return this.camerasService.getStreamSource(userId, id);
+  }
 }

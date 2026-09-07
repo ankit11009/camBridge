@@ -1,13 +1,31 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { PluginManagerService } from './plugin-manager.service';
+import { StreamingService } from '../streaming/streaming.service';
 import { BadRequestException } from '@nestjs/common';
 
 describe('PluginManagerService', () => {
   let service: PluginManagerService;
+  let mockStreamingService: Partial<StreamingService>;
 
   beforeEach(async () => {
+    mockStreamingService = {
+      startStream: jest
+        .fn()
+        .mockReturnValue({ url: '/streams/cam/stream.m3u8', protocol: 'hls' }),
+      stopStream: jest.fn().mockReturnValue(true),
+      getStreamSource: jest
+        .fn()
+        .mockReturnValue({ url: '/streams/cam/stream.m3u8', protocol: 'hls' }),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
-      providers: [PluginManagerService],
+      providers: [
+        PluginManagerService,
+        {
+          provide: StreamingService,
+          useValue: mockStreamingService,
+        },
+      ],
     }).compile();
 
     service = module.get<PluginManagerService>(PluginManagerService);
@@ -24,6 +42,11 @@ describe('PluginManagerService', () => {
 
     expect(plugin1).not.toBe(plugin2);
     expect(plugin1).toBe(plugin1Again);
+  });
+
+  it('should instantiate RtspCameraPlugin for RTSP type', () => {
+    const plugin = service.getOrCreatePlugin('cam-rtsp', 'RTSP');
+    expect(plugin.type).toBe('RTSP');
   });
 
   it('should throw BadRequestException for unknown plugin types', () => {

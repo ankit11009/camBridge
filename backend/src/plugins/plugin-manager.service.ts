@@ -6,12 +6,16 @@ import {
   StreamSource,
 } from './camera-plugin.interface';
 import { MockCameraPlugin } from './mock/mock-camera.plugin';
+import { RtspCameraPlugin } from './rtsp/rtsp-camera.plugin';
+import { StreamingService } from '../streaming/streaming.service';
 
 @Injectable()
 export class PluginManagerService {
   private readonly logger = new Logger(PluginManagerService.name);
   // Independent plugin instance per camera ID to prevent cross-camera state leakage
   private readonly cameraPlugins = new Map<string, CameraPlugin>();
+
+  constructor(private readonly streamingService: StreamingService) {}
 
   /**
    * Resolves or creates a dedicated camera plugin instance
@@ -27,10 +31,14 @@ export class PluginManagerService {
       this.logger.log(
         `Instantiating new plugin instance for camera ${cameraId} (type: ${pluginType})`,
       );
-      plugin = this.createPluginInstance(pluginType, onStatusChange);
+      plugin = this.createPluginInstance(cameraId, pluginType, onStatusChange);
       this.cameraPlugins.set(cameraId, plugin);
-    } else if (plugin instanceof MockCameraPlugin && onStatusChange) {
-      plugin.setStatusChangeHandler(onStatusChange);
+    } else {
+      if (plugin instanceof MockCameraPlugin && onStatusChange) {
+        plugin.setStatusChangeHandler(onStatusChange);
+      } else if (plugin instanceof RtspCameraPlugin && onStatusChange) {
+        plugin.setStatusChangeHandler(onStatusChange);
+      }
     }
 
     return plugin;
@@ -95,6 +103,7 @@ export class PluginManagerService {
   }
 
   private createPluginInstance(
+    cameraId: string,
     pluginType: string,
     onStatusChange?: (status: CameraStatusValue) => void,
   ): CameraPlugin {
@@ -102,10 +111,11 @@ export class PluginManagerService {
       case 'MOCK':
         return new MockCameraPlugin(onStatusChange);
       case 'RTSP':
-        // RTSP plugin will be wired in Phase 4
-        // Returning Mock fallback with TODO note
-        // TODO: Wire RtspCameraPlugin in Phase 4
-        return new MockCameraPlugin(onStatusChange);
+        return new RtspCameraPlugin(
+          cameraId,
+          this.streamingService,
+          onStatusChange,
+        );
       case 'ONVIF':
         // ONVIF plugin will be wired in Phase 5
         // Returning Mock fallback with TODO note

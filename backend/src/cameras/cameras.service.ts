@@ -111,7 +111,12 @@ export class CamerasService {
   async connect(
     userId: string,
     id: string,
-  ): Promise<{ id: string; status: CameraStatusValue; lastSeenAt: Date }> {
+  ): Promise<{
+    id: string;
+    status: CameraStatusValue;
+    lastSeenAt: Date;
+    streamSource?: any;
+  }> {
     const camera = await this.findOne(userId, id);
     const now = new Date();
 
@@ -162,10 +167,13 @@ export class CamerasService {
     });
     this.eventsService.emitCameraStatus(id, finalStatus, updatedTime);
 
+    const streamSource = await this.pluginManager.getStreamSource(id);
+
     return {
       id,
       status: finalStatus,
       lastSeenAt: updatedTime,
+      streamSource,
     };
   }
 
@@ -213,6 +221,18 @@ export class CamerasService {
     return {
       id,
       status,
+    };
+  }
+
+  /**
+   * Retrieves the current stream source (e.g. HLS playlist URL) for a camera
+   */
+  async getStreamSource(userId: string, id: string) {
+    await this.findOne(userId, id);
+    const streamSource = await this.pluginManager.getStreamSource(id);
+    return {
+      id,
+      streamSource,
     };
   }
 

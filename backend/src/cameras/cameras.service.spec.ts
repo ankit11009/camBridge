@@ -26,6 +26,7 @@ describe('CamerasService', () => {
     connect: jest.Mock;
     disconnect: jest.Mock;
     getStatus: jest.Mock;
+    getStreamSource: jest.Mock;
     removePlugin: jest.Mock;
   };
   let eventsService: {
@@ -55,6 +56,10 @@ describe('CamerasService', () => {
       connect: jest.fn().mockResolvedValue('CONNECTED'),
       disconnect: jest.fn().mockResolvedValue('DISCONNECTED'),
       getStatus: jest.fn().mockResolvedValue('CONNECTED'),
+      getStreamSource: jest.fn().mockResolvedValue({
+        url: '/streams/cam-1/stream.m3u8',
+        protocol: 'hls',
+      }),
       removePlugin: jest.fn().mockResolvedValue(undefined),
     };
 
@@ -256,6 +261,29 @@ describe('CamerasService', () => {
 
       const res = await service.getStatus('user-1', 'cam-1');
       expect(res.status).toBe('CONNECTED');
+    });
+  });
+
+  describe('getStreamSource', () => {
+    it('should return stream source from plugin manager', async () => {
+      const mockCam = {
+        id: 'cam-1',
+        ownerId: 'user-1',
+        name: 'Backyard',
+        pluginType: PluginType.MOCK,
+        connectionConfig: {},
+        status: CameraStatus.CONNECTED,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      prisma.camera.findFirst.mockResolvedValue(mockCam);
+
+      const res = await service.getStreamSource('user-1', 'cam-1');
+      expect(res.streamSource).toEqual({
+        url: '/streams/cam-1/stream.m3u8',
+        protocol: 'hls',
+      });
     });
   });
 });

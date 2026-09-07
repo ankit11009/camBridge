@@ -26,10 +26,21 @@ export interface UpdateCameraInput {
   connectionConfig?: Record<string, unknown>;
 }
 
+export interface StreamSource {
+  url: string;
+  protocol: 'hls' | 'webrtc';
+}
+
+export interface CameraStreamResponse {
+  id: string;
+  streamSource: StreamSource | null;
+}
+
 export interface CameraStatusResponse {
   id: string;
   status: CameraStatus;
   lastSeenAt?: string;
+  streamSource?: StreamSource | null;
 }
 
 export const camerasApi = {
@@ -70,6 +81,11 @@ export const camerasApi = {
 
   getStatus: async (id: string): Promise<CameraStatusResponse> => {
     const res = await apiClient.get<CameraStatusResponse>(`/cameras/${id}/status`);
+    return res.data;
+  },
+
+  getStreamSource: async (id: string): Promise<CameraStreamResponse> => {
+    const res = await apiClient.get<CameraStreamResponse>(`/cameras/${id}/stream`);
     return res.data;
   },
 };
