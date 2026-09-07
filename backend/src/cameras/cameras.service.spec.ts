@@ -4,6 +4,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { EncryptionService } from '../common/crypto/encryption.service';
 import { PluginManagerService } from '../plugins/plugin-manager.service';
 import { EventsService } from '../events/events.service';
+import { RecordingsService } from '../recordings/recordings.service';
+import { ReconnectionService } from './reconnection.service';
 import { PluginType, CameraStatus } from '@prisma/client';
 import { NotFoundException } from '@nestjs/common';
 
@@ -34,6 +36,13 @@ describe('CamerasService', () => {
     emitCameraStatus: jest.Mock;
     recordAndEmitEvent: jest.Mock;
     getEvents: jest.Mock;
+  };
+  let recordingsService: {
+    handleMotionEvent: jest.Mock;
+  };
+  let reconnectionService: {
+    scheduleReconnection: jest.Mock;
+    cancelReconnection: jest.Mock;
   };
 
   beforeEach(async () => {
@@ -85,6 +94,15 @@ describe('CamerasService', () => {
       ]),
     };
 
+    recordingsService = {
+      handleMotionEvent: jest.fn().mockResolvedValue(undefined),
+    };
+
+    reconnectionService = {
+      scheduleReconnection: jest.fn(),
+      cancelReconnection: jest.fn(),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         CamerasService,
@@ -103,6 +121,14 @@ describe('CamerasService', () => {
         {
           provide: EventsService,
           useValue: eventsService,
+        },
+        {
+          provide: RecordingsService,
+          useValue: recordingsService,
+        },
+        {
+          provide: ReconnectionService,
+          useValue: reconnectionService,
         },
       ],
     }).compile();

@@ -58,6 +58,18 @@ export interface CameraEvent {
   createdAt: string;
 }
 
+export interface Recording {
+  id: string;
+  cameraId: string;
+  filePath: string;
+  videoUrl: string;
+  duration: number | null;
+  sizeBytes: number | null;
+  trigger: 'MANUAL' | 'EVENT' | 'SCHEDULE';
+  startedAt: string;
+  finishedAt: string | null;
+}
+
 export const camerasApi = {
   list: async (): Promise<Camera[]> => {
     const res = await apiClient.get<Camera[]>('/cameras');
@@ -132,6 +144,21 @@ export const camerasApi = {
       `/cameras/${id}/events/trigger`,
       { type, payload },
     );
+    return res.data;
+  },
+
+  listRecordings: async (id: string): Promise<Recording[]> => {
+    const res = await apiClient.get<Recording[]>(`/cameras/${id}/recordings`);
+    return res.data;
+  },
+
+  startRecording: async (id: string): Promise<Recording> => {
+    const res = await apiClient.post<Recording>(`/cameras/${id}/recordings/start`);
+    return res.data;
+  },
+
+  stopRecording: async (id: string): Promise<Recording> => {
+    const res = await apiClient.post<Recording>(`/cameras/${id}/recordings/stop`);
     return res.data;
   },
 };

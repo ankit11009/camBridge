@@ -8,6 +8,7 @@ import { CamerasModule } from './cameras/cameras.module';
 import { PluginManagerModule } from './plugins/plugin-manager.module';
 import { EventsModule } from './events/events.module';
 import { StreamingModule } from './streaming/streaming.module';
+import { RecordingsModule } from './recordings/recordings.module';
 import { HealthModule } from './health/health.module';
 
 @Module({
@@ -21,6 +22,7 @@ import { HealthModule } from './health/health.module';
     UsersModule,
     AuthModule,
     StreamingModule,
+    RecordingsModule,
     PluginManagerModule,
     EventsModule,
     CamerasModule,

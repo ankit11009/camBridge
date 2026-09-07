@@ -1,6 +1,7 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../store/authStore';
 import { Camera, LogOut, User, Activity } from 'lucide-react';
+import { NotificationBell } from '../NotificationBell';
 
 export function Navbar() {
   const { user, logout } = useAuthStore();
@@ -22,7 +23,7 @@ export function Navbar() {
             <div className="text-base font-bold tracking-tight text-white flex items-center gap-2">
               CamBridge
               <span className="text-[10px] px-2 py-0.5 rounded-full font-medium bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                Phase 2
+                Phase 6
               </span>
             </div>
             <div className="text-[11px] text-slate-400">Plugin Camera Platform</div>
@@ -38,6 +39,8 @@ export function Navbar() {
           <Activity className="w-3.5 h-3.5 text-emerald-400" />
           System Health
         </Link>
+
+        {user && <NotificationBell />}
 
         {user && (
           <div className="flex items-center gap-3 pl-4 border-l border-slate-800">

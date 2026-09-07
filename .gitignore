@@ -37,7 +37,8 @@ Thumbs.db
 
 # Data & Streams
 data/
-recordings/
+/recordings/
+backend/recordings/
 streams/
 backend/streams/
 backend/dist/

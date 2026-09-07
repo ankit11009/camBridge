@@ -1,10 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { camerasApi, Camera } from '../api/cameras.api';
 import { CameraStatusBadge } from '../components/CameraStatusBadge';
 import { LiveVideoPlayer } from '../components/LiveVideoPlayer';
 import { EventTimeline } from '../components/EventTimeline';
+import { RecordingsList } from '../components/RecordingsList';
+import { useNotificationStore } from '../store/notificationStore';
 import { useCameraSocket } from '../hooks/useCameraSocket';
 import {
   ArrowLeft,
@@ -15,6 +17,8 @@ import {
   AlertCircle,
   Power,
   Loader2,
+  Circle,
+  Square,
 } from 'lucide-react';
 
 export function CameraDetailPage() {
@@ -29,6 +33,17 @@ export function CameraDetailPage() {
   const [isInitialized, setIsInitialized] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordSeconds, setRecordSeconds] = useState(0);
+  const recordTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (recordTimerRef.current) {
+        clearInterval(recordTimerRef.current);
+      }
+    };
+  }, []);
 
   const {
     data: camera,
@@ -52,6 +67,60 @@ export function CameraDetailPage() {
     queryFn: () => camerasApi.getStreamSource(id!),
     enabled: !!id && camera?.status === 'CONNECTED',
     refetchInterval: false,
+  });
+
+  const startRecordingMutation = useMutation({
+    mutationFn: () => camerasApi.startRecording(id!),
+    onSuccess: () => {
+      setIsRecording(true);
+      setRecordSeconds(0);
+      recordTimerRef.current = setInterval(() => {
+        setRecordSeconds((s) => s + 1);
+      }, 1000);
+      useNotificationStore.getState().addNotification({
+        type: 'info',
+        title: 'Recording Started',
+        message: `Manual recording started for ${camera?.name || 'camera'}`,
+      });
+      queryClient.invalidateQueries({ queryKey: ['camera-recordings', id] });
+    },
+    onError: (err: any) => {
+      const msg = err.response?.data?.message || 'Failed to start recording';
+      setErrorMsg(msg);
+      useNotificationStore.getState().addNotification({
+        type: 'error',
+        title: 'Recording Failed',
+        message: msg,
+      });
+    },
+  });
+
+  const stopRecordingMutation = useMutation({
+    mutationFn: () => camerasApi.stopRecording(id!),
+    onSuccess: (rec) => {
+      setIsRecording(false);
+      if (recordTimerRef.current) {
+        clearInterval(recordTimerRef.current);
+        recordTimerRef.current = null;
+      }
+      queryClient.invalidateQueries({ queryKey: ['camera-recordings', id] });
+      useNotificationStore.getState().addNotification({
+        type: 'success',
+        title: 'Recording Saved',
+        message: `Recording clip saved (${rec.duration || 0}s).`,
+      });
+      setSuccessMsg('Recording saved successfully');
+      setTimeout(() => setSuccessMsg(''), 3000);
+    },
+    onError: (err: any) => {
+      setIsRecording(false);
+      if (recordTimerRef.current) {
+        clearInterval(recordTimerRef.current);
+        recordTimerRef.current = null;
+      }
+      const msg = err.response?.data?.message || 'Failed to stop recording';
+      setErrorMsg(msg);
+    },
   });
 
   const updateMutation = useMutation({
@@ -234,9 +303,42 @@ export function CameraDetailPage() {
             <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
               Live Video Stream
             </h2>
-            {camera.status === 'CONNECTED' && (
-              <span className="text-[11px] text-emerald-400 font-mono">Transcoding HLS Active</span>
-            )}
+            <div className="flex items-center gap-3">
+              {isRecording && (
+                <div className="flex items-center gap-2 px-2.5 py-1 bg-rose-500/20 border border-rose-500/40 rounded-lg text-rose-400 text-xs font-mono font-semibold animate-pulse">
+                  <span className="w-2 h-2 rounded-full bg-rose-500" />
+                  REC {Math.floor(recordSeconds / 60)}:
+                  {String(recordSeconds % 60).padStart(2, '0')}
+                </div>
+              )}
+              {isConnected &&
+                (isRecording ? (
+                  <button
+                    type="button"
+                    onClick={() => stopRecordingMutation.mutate()}
+                    disabled={stopRecordingMutation.isPending}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-xs font-semibold shadow-lg shadow-rose-600/20 transition-all disabled:opacity-50"
+                  >
+                    <Square className="w-3.5 h-3.5 fill-current" />
+                    Stop Recording
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => startRecordingMutation.mutate()}
+                    disabled={startRecordingMutation.isPending}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 rounded-lg text-xs font-semibold transition-all disabled:opacity-50"
+                  >
+                    <Circle className="w-3 h-3 text-rose-500 fill-rose-500" />
+                    Record Clip
+                  </button>
+                ))}
+              {camera.status === 'CONNECTED' && (
+                <span className="text-[11px] text-emerald-400 font-mono hidden sm:inline">
+                  HLS Active
+                </span>
+              )}
+            </div>
           </div>
           <LiveVideoPlayer
             cameraId={camera.id}
@@ -278,6 +380,9 @@ export function CameraDetailPage() {
           </div>
         </form>
       </div>
+
+      {/* Recorded Clips & Playback */}
+      <RecordingsList cameraId={camera.id} />
 
       {/* Activity & Event Timeline */}
       <EventTimeline cameraId={camera.id} pluginType={camera.pluginType} />

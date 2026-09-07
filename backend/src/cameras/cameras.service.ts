@@ -8,6 +8,9 @@ import { CreateCameraDto } from './dto/create-camera.dto';
 import { UpdateCameraDto } from './dto/update-camera.dto';
 import { Camera, CameraStatus, EventType, Prisma } from '@prisma/client';
 
+import { RecordingsService } from '../recordings/recordings.service';
+import { ReconnectionService } from './reconnection.service';
+
 export interface FormattedCamera extends Omit<Camera, 'connectionConfig'> {
   connectionConfig: Record<string, unknown>;
 }
@@ -21,6 +24,8 @@ export class CamerasService {
     private readonly encryption: EncryptionService,
     private readonly pluginManager: PluginManagerService,
     private readonly eventsService: EventsService,
+    private readonly recordingsService: RecordingsService,
+    private readonly reconnectionService: ReconnectionService,
   ) {}
 
   async create(userId: string, dto: CreateCameraDto): Promise<FormattedCamera> {
@@ -136,6 +141,14 @@ export class CamerasService {
           `Failed to persist status transition for camera ${id}: ${(err as Error).message}`,
         );
       }
+      if (newStatus === 'DISCONNECTED' || newStatus === 'ERROR') {
+        this.reconnectionService.scheduleReconnection(camera.ownerId, id, () =>
+          this.connect(camera.ownerId, id),
+        );
+      } else if (newStatus === 'CONNECTED') {
+        this.reconnectionService.cancelReconnection(id);
+      }
+
       this.eventsService.emitCameraStatus(id, newStatus, timestamp);
     };
 
@@ -186,6 +199,7 @@ export class CamerasService {
   ): Promise<{ id: string; status: CameraStatusValue }> {
     await this.findOne(userId, id);
 
+    this.reconnectionService.cancelReconnection(id);
     const finalStatus = await this.pluginManager.disconnect(id);
     const now = new Date();
 
@@ -272,6 +286,14 @@ export class CamerasService {
       source: 'motion_detector',
       timestamp: new Date().toISOString(),
     };
+
+    if (type === 'MOTION') {
+      this.recordingsService.handleMotionEvent(cameraId).catch((err) => {
+        this.logger.warn(
+          `Event-triggered recording failed for camera ${cameraId}: ${(err as Error).message}`,
+        );
+      });
+    }
 
     return this.eventsService.recordAndEmitEvent(cameraId, type, eventPayload);
   }

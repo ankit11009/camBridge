@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { useQueryClient } from '@tanstack/react-query';
 import { Camera, CameraStatus } from '../api/cameras.api';
+import { useNotificationStore } from '../store/notificationStore';
 
 const WS_URL =
   import.meta.env.VITE_WS_URL ||
@@ -20,6 +21,27 @@ export function useCameraSocket(activeCameraId?: string) {
 
   const updateCache = useCallback(
     (data: CameraStatusPayload) => {
+      // Check status transition for notifications
+      if (data.status === 'DISCONNECTED') {
+        useNotificationStore.getState().addNotification({
+          type: 'warning',
+          title: 'Camera Disconnected',
+          message: `Camera ${data.cameraId.slice(0, 8)} disconnected. Auto-reconnection scheduled.`,
+        });
+      } else if (data.status === 'ERROR') {
+        useNotificationStore.getState().addNotification({
+          type: 'error',
+          title: 'Camera Connection Error',
+          message: `Camera ${data.cameraId.slice(0, 8)} encountered a connection fault.`,
+        });
+      } else if (data.status === 'CONNECTED') {
+        useNotificationStore.getState().addNotification({
+          type: 'success',
+          title: 'Camera Connected',
+          message: `Camera ${data.cameraId.slice(0, 8)} is online and streaming.`,
+        });
+      }
+
       // Direct cache mutation for camera list
       queryClient.setQueryData<Camera[]>(['cameras'], (old) => {
         if (!old) return old;
@@ -58,11 +80,21 @@ export function useCameraSocket(activeCameraId?: string) {
       updateCache(data);
     });
 
-    socket.on('camera:event', (data: { cameraId: string }) => {
+    socket.on('camera:event', (data: { cameraId: string; type?: string }) => {
       if (data?.cameraId) {
         queryClient.invalidateQueries({
           queryKey: ['camera-events', data.cameraId],
         });
+        queryClient.invalidateQueries({
+          queryKey: ['camera-recordings', data.cameraId],
+        });
+        if (data.type === 'MOTION') {
+          useNotificationStore.getState().addNotification({
+            type: 'info',
+            title: 'Motion Detected',
+            message: `Motion event captured for camera ${data.cameraId.slice(0, 8)}. Automatic clip recording triggered.`,
+          });
+        }
       }
     });
 
