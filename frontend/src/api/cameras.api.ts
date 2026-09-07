@@ -43,6 +43,21 @@ export interface CameraStatusResponse {
   streamSource?: StreamSource | null;
 }
 
+export interface DiscoveredDevice {
+  id: string;
+  name: string;
+  address: string;
+  metadata?: Record<string, any>;
+}
+
+export interface CameraEvent {
+  id: string;
+  cameraId: string;
+  type: 'STATUS' | 'MOTION' | 'DETECTION';
+  payload: Record<string, any>;
+  createdAt: string;
+}
+
 export const camerasApi = {
   list: async (): Promise<Camera[]> => {
     const res = await apiClient.get<Camera[]>('/cameras');
@@ -86,6 +101,37 @@ export const camerasApi = {
 
   getStreamSource: async (id: string): Promise<CameraStreamResponse> => {
     const res = await apiClient.get<CameraStreamResponse>(`/cameras/${id}/stream`);
+    return res.data;
+  },
+
+  discover: async (): Promise<DiscoveredDevice[]> => {
+    const res = await apiClient.get<DiscoveredDevice[]>('/cameras/discover');
+    return res.data;
+  },
+
+  getEvents: async (
+    id: string,
+    limit?: number,
+    type?: string,
+  ): Promise<CameraEvent[]> => {
+    const params: Record<string, string | number> = {};
+    if (limit) params.limit = limit;
+    if (type) params.type = type;
+    const res = await apiClient.get<CameraEvent[]>(`/cameras/${id}/events`, {
+      params,
+    });
+    return res.data;
+  },
+
+  triggerEvent: async (
+    id: string,
+    type: 'MOTION' | 'STATUS' = 'MOTION',
+    payload?: Record<string, any>,
+  ): Promise<CameraEvent> => {
+    const res = await apiClient.post<CameraEvent>(
+      `/cameras/${id}/events/trigger`,
+      { type, payload },
+    );
     return res.data;
   },
 };

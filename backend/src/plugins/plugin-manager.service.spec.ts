@@ -1,11 +1,13 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { PluginManagerService } from './plugin-manager.service';
 import { StreamingService } from '../streaming/streaming.service';
+import { OnvifDiscoveryService } from './onvif/onvif-discovery.service';
 import { BadRequestException } from '@nestjs/common';
 
 describe('PluginManagerService', () => {
   let service: PluginManagerService;
   let mockStreamingService: Partial<StreamingService>;
+  let mockOnvifDiscoveryService: Partial<OnvifDiscoveryService>;
 
   beforeEach(async () => {
     mockStreamingService = {
@@ -18,12 +20,27 @@ describe('PluginManagerService', () => {
         .mockReturnValue({ url: '/streams/cam/stream.m3u8', protocol: 'hls' }),
     };
 
+    mockOnvifDiscoveryService = {
+      discover: jest.fn().mockResolvedValue([
+        {
+          id: 'dev-1',
+          name: 'Living Room ONVIF Cam',
+          address: 'http://192.168.1.100:80/onvif/device_service',
+          metadata: {},
+        },
+      ]),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PluginManagerService,
         {
           provide: StreamingService,
           useValue: mockStreamingService,
+        },
+        {
+          provide: OnvifDiscoveryService,
+          useValue: mockOnvifDiscoveryService,
         },
       ],
     }).compile();
@@ -49,10 +66,22 @@ describe('PluginManagerService', () => {
     expect(plugin.type).toBe('RTSP');
   });
 
+  it('should instantiate OnvifCameraPlugin for ONVIF type', () => {
+    const plugin = service.getOrCreatePlugin('cam-onvif', 'ONVIF');
+    expect(plugin.type).toBe('ONVIF');
+  });
+
   it('should throw BadRequestException for unknown plugin types', () => {
     expect(() => service.getOrCreatePlugin('cam-1', 'INVALID_TYPE')).toThrow(
       BadRequestException,
     );
+  });
+
+  it('should delegate discovery to OnvifDiscoveryService', async () => {
+    const devices = await service.discover(100);
+    expect(devices).toHaveLength(1);
+    expect(devices[0].name).toBe('Living Room ONVIF Cam');
+    expect(mockOnvifDiscoveryService.discover).toHaveBeenCalledWith(100);
   });
 
   it('should connect and disconnect camera through plugin', async () => {

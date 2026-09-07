@@ -9,7 +9,9 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
+  Query,
 } from '@nestjs/common';
+import { EventType } from '@prisma/client';
 import { CamerasService } from './cameras.service';
 import { CreateCameraDto } from './dto/create-camera.dto';
 import { UpdateCameraDto } from './dto/update-camera.dto';
@@ -32,6 +34,11 @@ export class CamerasController {
   @Get()
   async findAll(@CurrentUser('userId') userId: string) {
     return this.camerasService.findAll(userId);
+  }
+
+  @Get('discover')
+  async discover() {
+    return this.camerasService.discoverCameras();
   }
 
   @Get(':id')
@@ -89,5 +96,31 @@ export class CamerasController {
     @Param('id') id: string,
   ) {
     return this.camerasService.getStreamSource(userId, id);
+  }
+
+  @Get(':id/events')
+  async getEvents(
+    @CurrentUser('userId') userId: string,
+    @Param('id') id: string,
+    @Query('limit') limit?: string,
+    @Query('type') type?: EventType,
+  ) {
+    const limitNum = limit ? parseInt(limit, 10) : 50;
+    return this.camerasService.getCameraEvents(userId, id, limitNum, type);
+  }
+
+  @Post(':id/events/trigger')
+  @HttpCode(HttpStatus.OK)
+  async triggerEvent(
+    @CurrentUser('userId') userId: string,
+    @Param('id') id: string,
+    @Body() body: { type?: EventType; payload?: Record<string, any> },
+  ) {
+    return this.camerasService.triggerCameraEvent(
+      userId,
+      id,
+      body?.type || 'MOTION',
+      body?.payload,
+    );
   }
 }

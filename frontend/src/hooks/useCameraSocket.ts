@@ -58,6 +58,14 @@ export function useCameraSocket(activeCameraId?: string) {
       updateCache(data);
     });
 
+    socket.on('camera:event', (data: { cameraId: string }) => {
+      if (data?.cameraId) {
+        queryClient.invalidateQueries({
+          queryKey: ['camera-events', data.cameraId],
+        });
+      }
+    });
+
     if (activeCameraId) {
       socket.emit('subscribe:camera', { cameraId: activeCameraId });
     }

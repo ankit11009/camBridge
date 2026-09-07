@@ -18,6 +18,13 @@ export class EventsService {
   ) {
     this.logger.log(`Emitting camera:status for ${cameraId} -> ${status}`);
     this.gateway.broadcastCameraStatus(cameraId, status, lastSeenAt);
+    this.recordAndEmitEvent(cameraId, 'STATUS', { status, lastSeenAt }).catch(
+      (err) => {
+        this.logger.debug(
+          `Status event recording skipped: ${(err as Error).message}`,
+        );
+      },
+    );
   }
 
   async recordAndEmitEvent(
@@ -25,14 +32,13 @@ export class EventsService {
     type: 'STATUS' | 'MOTION' | 'DETECTION',
     payload: unknown,
   ) {
-    this.gateway.broadcastCameraEvent(cameraId, type, payload);
-    // Optionally persist event row if Prisma is available
+    let savedEvent = null;
     try {
-      await this.prisma.event.create({
+      savedEvent = await this.prisma.event.create({
         data: {
           cameraId,
           type,
-          payload: payload as any,
+          payload: (payload ?? {}) as any,
         },
       });
     } catch (err) {
@@ -40,5 +46,29 @@ export class EventsService {
         `Could not persist event for camera ${cameraId}: ${(err as Error).message}`,
       );
     }
+
+    this.gateway.broadcastCameraEvent(
+      cameraId,
+      type,
+      payload,
+      savedEvent?.createdAt,
+    );
+    return savedEvent;
+  }
+
+  async getEvents(
+    cameraId: string,
+    limit = 50,
+    type?: 'STATUS' | 'MOTION' | 'DETECTION',
+  ) {
+    const where: any = { cameraId };
+    if (type) {
+      where.type = type;
+    }
+    return this.prisma.event.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: Math.min(Math.max(1, limit), 100),
+    });
   }
 }

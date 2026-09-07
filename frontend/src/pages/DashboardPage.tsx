@@ -3,11 +3,13 @@ import { useQuery } from '@tanstack/react-query';
 import { camerasApi } from '../api/cameras.api';
 import { CameraCard } from '../components/CameraCard';
 import { CreateCameraModal } from '../components/CreateCameraModal';
+import { DiscoverModal } from '../components/DiscoverModal';
 import { useCameraSocket } from '../hooks/useCameraSocket';
-import { Plus, RefreshCw, Video, AlertCircle } from 'lucide-react';
+import { Plus, RefreshCw, Video, AlertCircle, Radar } from 'lucide-react';
 
 export function DashboardPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isDiscoverOpen, setIsDiscoverOpen] = useState(false);
   // Establish WebSocket connection for real-time camera status updates
   useCameraSocket();
 
@@ -43,6 +45,15 @@ export function DashboardPage() {
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isFetching ? 'animate-spin' : ''}`} />
             <span className="hidden sm:inline">Refresh</span>
+          </button>
+
+          <button
+            onClick={() => setIsDiscoverOpen(true)}
+            className="flex items-center gap-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-indigo-300 hover:text-white px-3.5 py-2.5 rounded-xl border border-indigo-500/30 transition-colors"
+            title="Scan local subnet for ONVIF IP cameras"
+          >
+            <Radar className="w-3.5 h-3.5 text-indigo-400" />
+            <span className="hidden sm:inline">Scan Network</span>
           </button>
 
           <button
@@ -110,8 +121,9 @@ export function DashboardPage() {
         </div>
       )}
 
-      {/* Modal */}
+      {/* Modals */}
       <CreateCameraModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} />
+      <DiscoverModal isOpen={isDiscoverOpen} onClose={() => setIsDiscoverOpen(false)} />
     </div>
   );
 }

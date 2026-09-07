@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { camerasApi, Camera } from '../api/cameras.api';
 import { CameraStatusBadge } from '../components/CameraStatusBadge';
 import { LiveVideoPlayer } from '../components/LiveVideoPlayer';
+import { EventTimeline } from '../components/EventTimeline';
 import { useCameraSocket } from '../hooks/useCameraSocket';
 import {
   ArrowLeft,
@@ -277,6 +278,9 @@ export function CameraDetailPage() {
           </div>
         </form>
       </div>
+
+      {/* Activity & Event Timeline */}
+      <EventTimeline cameraId={camera.id} pluginType={camera.pluginType} />
     </div>
   );
 }

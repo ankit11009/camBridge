@@ -6,7 +6,7 @@ import { EventsService } from '../events/events.service';
 import { CameraStatusValue } from '../plugins/camera-plugin.interface';
 import { CreateCameraDto } from './dto/create-camera.dto';
 import { UpdateCameraDto } from './dto/update-camera.dto';
-import { Camera, CameraStatus, Prisma } from '@prisma/client';
+import { Camera, CameraStatus, EventType, Prisma } from '@prisma/client';
 
 export interface FormattedCamera extends Omit<Camera, 'connectionConfig'> {
   connectionConfig: Record<string, unknown>;
@@ -234,6 +234,46 @@ export class CamerasService {
       id,
       streamSource,
     };
+  }
+
+  /**
+   * Discovers ONVIF cameras on the local network
+   */
+  async discoverCameras() {
+    return this.pluginManager.discover();
+  }
+
+  /**
+   * Queries stored events for a camera
+   */
+  async getCameraEvents(
+    userId: string,
+    cameraId: string,
+    limit?: number,
+    type?: EventType,
+  ) {
+    await this.findOne(userId, cameraId);
+    return this.eventsService.getEvents(cameraId, limit, type);
+  }
+
+  /**
+   * Triggers a simulated event (e.g. MOTION) for a camera and persists/broadcasts it
+   */
+  async triggerCameraEvent(
+    userId: string,
+    cameraId: string,
+    type: EventType = 'MOTION',
+    payload?: Record<string, any>,
+  ) {
+    await this.findOne(userId, cameraId);
+    const eventPayload = payload ?? {
+      message: 'Motion detected in active zone',
+      confidence: 0.95,
+      source: 'motion_detector',
+      timestamp: new Date().toISOString(),
+    };
+
+    return this.eventsService.recordAndEmitEvent(cameraId, type, eventPayload);
   }
 
   private formatCamera(camera: Camera): FormattedCamera {

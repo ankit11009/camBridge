@@ -28,10 +28,12 @@ describe('CamerasService', () => {
     getStatus: jest.Mock;
     getStreamSource: jest.Mock;
     removePlugin: jest.Mock;
+    discover: jest.Mock;
   };
   let eventsService: {
     emitCameraStatus: jest.Mock;
     recordAndEmitEvent: jest.Mock;
+    getEvents: jest.Mock;
   };
 
   beforeEach(async () => {
@@ -61,11 +63,26 @@ describe('CamerasService', () => {
         protocol: 'hls',
       }),
       removePlugin: jest.fn().mockResolvedValue(undefined),
+      discover: jest.fn().mockResolvedValue([
+        {
+          id: 'dev-1',
+          name: 'Front Cam',
+          address: 'http://192.168.1.10:80/onvif/device_service',
+        },
+      ]),
     };
 
     eventsService = {
       emitCameraStatus: jest.fn(),
       recordAndEmitEvent: jest.fn(),
+      getEvents: jest.fn().mockResolvedValue([
+        {
+          id: 'ev-1',
+          cameraId: 'cam-1',
+          type: 'MOTION',
+          payload: { message: 'Motion detected' },
+        },
+      ]),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -284,6 +301,77 @@ describe('CamerasService', () => {
         url: '/streams/cam-1/stream.m3u8',
         protocol: 'hls',
       });
+    });
+  });
+
+  describe('discoverCameras', () => {
+    it('delegates to plugin manager discover', async () => {
+      const devices = await service.discoverCameras();
+      expect(devices).toHaveLength(1);
+      expect(devices[0].name).toBe('Front Cam');
+      expect(pluginManager.discover).toHaveBeenCalled();
+    });
+  });
+
+  describe('getCameraEvents', () => {
+    it('queries events for existing camera', async () => {
+      const mockCam = {
+        id: 'cam-1',
+        ownerId: 'user-1',
+        name: 'Backyard',
+        pluginType: PluginType.MOCK,
+        connectionConfig: {},
+        status: CameraStatus.CONNECTED,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      prisma.camera.findFirst.mockResolvedValue(mockCam);
+
+      const events = await service.getCameraEvents('user-1', 'cam-1', 20);
+      expect(events).toHaveLength(1);
+      expect(events[0].type).toBe('MOTION');
+      expect(eventsService.getEvents).toHaveBeenCalledWith(
+        'cam-1',
+        20,
+        undefined,
+      );
+    });
+  });
+
+  describe('triggerCameraEvent', () => {
+    it('records and emits simulated event', async () => {
+      const mockCam = {
+        id: 'cam-1',
+        ownerId: 'user-1',
+        name: 'Backyard',
+        pluginType: PluginType.MOCK,
+        connectionConfig: {},
+        status: CameraStatus.CONNECTED,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      prisma.camera.findFirst.mockResolvedValue(mockCam);
+      eventsService.recordAndEmitEvent.mockResolvedValue({
+        id: 'ev-new',
+        cameraId: 'cam-1',
+        type: 'MOTION',
+      });
+
+      const res = await service.triggerCameraEvent(
+        'user-1',
+        'cam-1',
+        'MOTION',
+        {
+          custom: true,
+        },
+      );
+
+      expect(eventsService.recordAndEmitEvent).toHaveBeenCalledWith(
+        'cam-1',
+        'MOTION',
+        { custom: true },
+      );
+      expect(res).toBeDefined();
     });
   });
 });

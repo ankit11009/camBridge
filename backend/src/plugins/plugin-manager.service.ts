@@ -4,9 +4,12 @@ import {
   CameraStatusValue,
   CameraConnectionConfig,
   StreamSource,
+  DiscoveredDevice,
 } from './camera-plugin.interface';
 import { MockCameraPlugin } from './mock/mock-camera.plugin';
 import { RtspCameraPlugin } from './rtsp/rtsp-camera.plugin';
+import { OnvifCameraPlugin } from './onvif/onvif-camera.plugin';
+import { OnvifDiscoveryService } from './onvif/onvif-discovery.service';
 import { StreamingService } from '../streaming/streaming.service';
 
 @Injectable()
@@ -15,7 +18,10 @@ export class PluginManagerService {
   // Independent plugin instance per camera ID to prevent cross-camera state leakage
   private readonly cameraPlugins = new Map<string, CameraPlugin>();
 
-  constructor(private readonly streamingService: StreamingService) {}
+  constructor(
+    private readonly streamingService: StreamingService,
+    private readonly onvifDiscoveryService: OnvifDiscoveryService,
+  ) {}
 
   /**
    * Resolves or creates a dedicated camera plugin instance
@@ -37,6 +43,8 @@ export class PluginManagerService {
       if (plugin instanceof MockCameraPlugin && onStatusChange) {
         plugin.setStatusChangeHandler(onStatusChange);
       } else if (plugin instanceof RtspCameraPlugin && onStatusChange) {
+        plugin.setStatusChangeHandler(onStatusChange);
+      } else if (plugin instanceof OnvifCameraPlugin && onStatusChange) {
         plugin.setStatusChangeHandler(onStatusChange);
       }
     }
@@ -117,14 +125,26 @@ export class PluginManagerService {
           onStatusChange,
         );
       case 'ONVIF':
-        // ONVIF plugin will be wired in Phase 5
-        // Returning Mock fallback with TODO note
-        // TODO: Wire OnvifCameraPlugin in Phase 5
-        return new MockCameraPlugin(onStatusChange);
+        return new OnvifCameraPlugin(
+          cameraId,
+          this.streamingService,
+          onStatusChange,
+        );
       default:
         throw new BadRequestException(
           `Unsupported camera plugin type: ${pluginType}`,
         );
     }
+  }
+
+  async discover(timeoutMs?: number): Promise<DiscoveredDevice[]> {
+    this.logger.log(
+      'Starting network device discovery via ONVIF WS-Discovery...',
+    );
+    return this.onvifDiscoveryService.discover(timeoutMs);
+  }
+
+  getPlugin(cameraId: string): CameraPlugin | undefined {
+    return this.cameraPlugins.get(cameraId);
   }
 }
