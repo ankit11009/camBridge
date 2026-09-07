@@ -6,8 +6,8 @@ import { CameraCard } from './CameraCard';
 import { Camera } from '../api/cameras.api';
 
 describe('CameraCard Component', () => {
-  const mockCamera: Camera = {
-    id: 'test-camera-12345678',
+  const connectedCamera: Camera = {
+    id: 'test-camera-1',
     ownerId: 'user-1',
     name: 'Garage Door Camera',
     pluginType: 'MOCK',
@@ -17,13 +17,24 @@ describe('CameraCard Component', () => {
     updatedAt: new Date().toISOString(),
   };
 
-  it('renders camera name, plugin type, and status badge', () => {
+  const disconnectedCamera: Camera = {
+    id: 'test-camera-2',
+    ownerId: 'user-1',
+    name: 'Backyard Camera',
+    pluginType: 'MOCK',
+    connectionConfig: { simulateIntervalMs: 5000 },
+    status: 'DISCONNECTED',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  it('renders camera details and Disconnect button when connected', () => {
     const queryClient = new QueryClient();
 
     render(
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
-          <CameraCard camera={mockCamera} />
+          <CameraCard camera={connectedCamera} />
         </BrowserRouter>
       </QueryClientProvider>,
     );
@@ -31,6 +42,23 @@ describe('CameraCard Component', () => {
     expect(screen.getByText('Garage Door Camera')).toBeDefined();
     expect(screen.getByText('MOCK')).toBeDefined();
     expect(screen.getByText('Connected')).toBeDefined();
+    expect(screen.getByText('Disconnect')).toBeDefined();
     expect(screen.getByText('Manage')).toBeDefined();
+  });
+
+  it('renders Connect button when disconnected', () => {
+    const queryClient = new QueryClient();
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <BrowserRouter>
+          <CameraCard camera={disconnectedCamera} />
+        </BrowserRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(screen.getByText('Backyard Camera')).toBeDefined();
+    expect(screen.getByText('Disconnected')).toBeDefined();
+    expect(screen.getByText('Connect')).toBeDefined();
   });
 });

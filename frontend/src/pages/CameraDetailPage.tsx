@@ -1,14 +1,27 @@
 import React, { useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { camerasApi } from '../api/cameras.api';
+import { camerasApi, Camera } from '../api/cameras.api';
 import { CameraStatusBadge } from '../components/CameraStatusBadge';
-import { ArrowLeft, Save, Trash2, Video, CheckCircle2, AlertCircle } from 'lucide-react';
+import { useCameraSocket } from '../hooks/useCameraSocket';
+import {
+  ArrowLeft,
+  Save,
+  Trash2,
+  Video,
+  CheckCircle2,
+  AlertCircle,
+  Power,
+  Loader2,
+} from 'lucide-react';
 
 export function CameraDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+
+  // Listen to WebSocket updates for this camera specifically
+  useCameraSocket(id);
 
   const [name, setName] = useState('');
   const [isInitialized, setIsInitialized] = useState(false);
@@ -42,6 +55,34 @@ export function CameraDetailPage() {
     },
     onError: (err: any) => {
       setErrorMsg(err.response?.data?.message || 'Failed to update camera');
+    },
+  });
+
+  const connectMutation = useMutation({
+    mutationFn: () => camerasApi.connect(id!),
+    onSuccess: (res) => {
+      queryClient.setQueryData<Camera>(['camera', id], (old) => {
+        if (!old) return old;
+        return { ...old, status: res.status };
+      });
+      queryClient.invalidateQueries({ queryKey: ['cameras'] });
+    },
+    onError: (err: any) => {
+      setErrorMsg(err.response?.data?.message || 'Failed to connect camera');
+    },
+  });
+
+  const disconnectMutation = useMutation({
+    mutationFn: () => camerasApi.disconnect(id!),
+    onSuccess: (res) => {
+      queryClient.setQueryData<Camera>(['camera', id], (old) => {
+        if (!old) return old;
+        return { ...old, status: res.status };
+      });
+      queryClient.invalidateQueries({ queryKey: ['cameras'] });
+    },
+    onError: (err: any) => {
+      setErrorMsg(err.response?.data?.message || 'Failed to disconnect camera');
     },
   });
 
@@ -82,6 +123,9 @@ export function CameraDetailPage() {
     );
   }
 
+  const isConnected = camera.status === 'CONNECTED';
+  const isConnecting = camera.status === 'CONNECTING' || connectMutation.isPending;
+
   return (
     <div className="space-y-6 max-w-3xl mx-auto">
       <div className="flex items-center justify-between">
@@ -108,7 +152,7 @@ export function CameraDetailPage() {
 
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-7 shadow-xl space-y-6">
         {/* Header */}
-        <div className="flex items-start justify-between pb-6 border-b border-slate-800/80">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-6 border-b border-slate-800/80 gap-4">
           <div className="flex items-center gap-3.5">
             <div className="p-3 bg-indigo-600/20 text-indigo-400 rounded-xl border border-indigo-500/30">
               <Video className="w-6 h-6" />
@@ -123,7 +167,39 @@ export function CameraDetailPage() {
               </div>
             </div>
           </div>
-          <CameraStatusBadge status={camera.status} />
+
+          <div className="flex items-center gap-3">
+            <CameraStatusBadge status={camera.status} />
+
+            {isConnected ? (
+              <button
+                onClick={() => disconnectMutation.mutate()}
+                disabled={disconnectMutation.isPending}
+                className="flex items-center gap-1.5 text-xs font-semibold bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 py-2 px-3.5 rounded-xl border border-rose-500/20 transition-colors disabled:opacity-50"
+              >
+                <Power className="w-3.5 h-3.5" />
+                {disconnectMutation.isPending ? 'Disconnecting...' : 'Disconnect'}
+              </button>
+            ) : (
+              <button
+                onClick={() => connectMutation.mutate()}
+                disabled={isConnecting}
+                className="flex items-center gap-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white py-2 px-3.5 rounded-xl transition-colors shadow-lg shadow-emerald-600/20 disabled:opacity-50"
+              >
+                {isConnecting ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    Connecting...
+                  </>
+                ) : (
+                  <>
+                    <Power className="w-3.5 h-3.5" />
+                    Connect Camera
+                  </>
+                )}
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Notifications */}

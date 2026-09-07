@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Camera, camerasApi } from '../api/cameras.api';
 import { CameraStatusBadge } from './CameraStatusBadge';
-import { Video, Trash2, Settings, AlertCircle } from 'lucide-react';
+import { Video, Trash2, Settings, AlertCircle, Power, Loader2 } from 'lucide-react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
 interface Props {
@@ -12,6 +12,26 @@ interface Props {
 export function CameraCard({ camera }: Props) {
   const queryClient = useQueryClient();
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
+
+  const connectMutation = useMutation({
+    mutationFn: () => camerasApi.connect(camera.id),
+    onSuccess: (res) => {
+      queryClient.setQueryData<Camera[]>(['cameras'], (old) => {
+        if (!old) return old;
+        return old.map((c) => (c.id === camera.id ? { ...c, status: res.status } : c));
+      });
+    },
+  });
+
+  const disconnectMutation = useMutation({
+    mutationFn: () => camerasApi.disconnect(camera.id),
+    onSuccess: (res) => {
+      queryClient.setQueryData<Camera[]>(['cameras'], (old) => {
+        if (!old) return old;
+        return old.map((c) => (c.id === camera.id ? { ...c, status: res.status } : c));
+      });
+    },
+  });
 
   const deleteMutation = useMutation({
     mutationFn: () => camerasApi.delete(camera.id),
@@ -32,6 +52,9 @@ export function CameraCard({ camera }: Props) {
         return 'bg-slate-700 text-slate-300 border-slate-600';
     }
   };
+
+  const isConnecting = camera.status === 'CONNECTING' || connectMutation.isPending;
+  const isConnected = camera.status === 'CONNECTED';
 
   return (
     <div className="bg-slate-900 border border-slate-800 hover:border-slate-700/80 transition-all rounded-xl p-5 shadow-lg flex flex-col justify-between group">
@@ -72,59 +95,90 @@ export function CameraCard({ camera }: Props) {
             </span>
           </div>
           <div className="flex justify-between text-slate-400">
-            <span>Configuration</span>
+            <span>Last Active</span>
             <span className="text-slate-300 font-mono">
-              {Object.keys(camera.connectionConfig || {}).length > 0
-                ? `${Object.keys(camera.connectionConfig).length} keys set`
-                : 'Default'}
+              {camera.lastSeenAt
+                ? new Date(camera.lastSeenAt).toLocaleTimeString()
+                : 'Never'}
             </span>
           </div>
         </div>
       </div>
 
       {/* Actions */}
-      <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between gap-2">
-        <Link
-          to={`/cameras/${camera.id}`}
-          className="flex-1 flex items-center justify-center gap-1.5 text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 py-2 px-3 rounded-lg border border-slate-700/60 transition-colors"
-        >
-          <Settings className="w-3.5 h-3.5 text-slate-400" />
-          Manage
-        </Link>
+      <div className="pt-3 border-t border-slate-800/80 space-y-2">
+        <div className="flex items-center gap-2">
+          {isConnected ? (
+            <button
+              onClick={() => disconnectMutation.mutate()}
+              disabled={disconnectMutation.isPending}
+              className="flex-1 flex items-center justify-center gap-1.5 text-xs font-semibold bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 py-2 px-3 rounded-lg border border-rose-500/20 transition-colors disabled:opacity-50"
+            >
+              <Power className="w-3.5 h-3.5" />
+              {disconnectMutation.isPending ? 'Disconnecting...' : 'Disconnect'}
+            </button>
+          ) : (
+            <button
+              onClick={() => connectMutation.mutate()}
+              disabled={isConnecting}
+              className="flex-1 flex items-center justify-center gap-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white py-2 px-3 rounded-lg transition-colors shadow-lg shadow-emerald-600/20 disabled:opacity-50"
+            >
+              {isConnecting ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  Connecting...
+                </>
+              ) : (
+                <>
+                  <Power className="w-3.5 h-3.5" />
+                  Connect
+                </>
+              )}
+            </button>
+          )}
 
-        {isConfirmingDelete ? (
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => deleteMutation.mutate()}
-              disabled={deleteMutation.isPending}
-              className="text-xs bg-rose-600 hover:bg-rose-500 text-white px-2.5 py-2 rounded-lg font-medium transition-colors"
-            >
-              {deleteMutation.isPending ? '...' : 'Confirm'}
-            </button>
-            <button
-              onClick={() => setIsConfirmingDelete(false)}
-              className="text-xs bg-slate-800 text-slate-300 hover:bg-slate-700 px-2.5 py-2 rounded-lg transition-colors"
-            >
-              Cancel
-            </button>
-          </div>
-        ) : (
-          <button
-            onClick={() => setIsConfirmingDelete(true)}
-            className="p-2 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors"
-            title="Delete Camera"
+          <Link
+            to={`/cameras/${camera.id}`}
+            className="flex items-center justify-center gap-1.5 text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 py-2 px-3 rounded-lg border border-slate-700/60 transition-colors"
           >
-            <Trash2 className="w-4 h-4" />
-          </button>
+            <Settings className="w-3.5 h-3.5 text-slate-400" />
+            Manage
+          </Link>
+
+          {isConfirmingDelete ? (
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => deleteMutation.mutate()}
+                disabled={deleteMutation.isPending}
+                className="text-xs bg-rose-600 hover:bg-rose-500 text-white px-2 py-2 rounded-lg font-medium transition-colors"
+              >
+                Del
+              </button>
+              <button
+                onClick={() => setIsConfirmingDelete(false)}
+                className="text-xs bg-slate-800 text-slate-300 hover:bg-slate-700 px-2 py-2 rounded-lg transition-colors"
+              >
+                No
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setIsConfirmingDelete(true)}
+              className="p-2 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors"
+              title="Delete Camera"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+
+        {(connectMutation.isError || disconnectMutation.isError || deleteMutation.isError) && (
+          <div className="text-[11px] text-rose-400 flex items-center gap-1 pt-1">
+            <AlertCircle className="w-3 h-3 shrink-0" />
+            <span>Action failed. Check console or server logs.</span>
+          </div>
         )}
       </div>
-
-      {deleteMutation.isError && (
-        <div className="mt-2 text-[11px] text-rose-400 flex items-center gap-1">
-          <AlertCircle className="w-3 h-3" />
-          <span>Failed to delete camera</span>
-        </div>
-      )}
     </div>
   );
 }

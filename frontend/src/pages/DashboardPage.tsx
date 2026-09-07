@@ -3,10 +3,13 @@ import { useQuery } from '@tanstack/react-query';
 import { camerasApi } from '../api/cameras.api';
 import { CameraCard } from '../components/CameraCard';
 import { CreateCameraModal } from '../components/CreateCameraModal';
+import { useCameraSocket } from '../hooks/useCameraSocket';
 import { Plus, RefreshCw, Video, AlertCircle } from 'lucide-react';
 
 export function DashboardPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
+  // Establish WebSocket connection for real-time camera status updates
+  useCameraSocket();
 
   const {
     data: cameras = [],

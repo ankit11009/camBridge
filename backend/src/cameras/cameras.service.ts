@@ -1,6 +1,9 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { EncryptionService } from '../common/crypto/encryption.service';
+import { PluginManagerService } from '../plugins/plugin-manager.service';
+import { EventsService } from '../events/events.service';
+import { CameraStatusValue } from '../plugins/camera-plugin.interface';
 import { CreateCameraDto } from './dto/create-camera.dto';
 import { UpdateCameraDto } from './dto/update-camera.dto';
 import { Camera, CameraStatus, Prisma } from '@prisma/client';
@@ -11,9 +14,13 @@ export interface FormattedCamera extends Omit<Camera, 'connectionConfig'> {
 
 @Injectable()
 export class CamerasService {
+  private readonly logger = new Logger(CamerasService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly encryption: EncryptionService,
+    private readonly pluginManager: PluginManagerService,
+    private readonly eventsService: EventsService,
   ) {}
 
   async create(userId: string, dto: CreateCameraDto): Promise<FormattedCamera> {
@@ -88,11 +95,125 @@ export class CamerasService {
     // Verify existence and ownership
     await this.findOne(userId, id);
 
+    // Disconnect and remove plugin instance
+    await this.pluginManager.removePlugin(id);
+
     await this.prisma.camera.delete({
       where: { id },
     });
 
     return { success: true, id };
+  }
+
+  /**
+   * Triggers connection via the appropriate plugin and coordinates real-time status updates
+   */
+  async connect(
+    userId: string,
+    id: string,
+  ): Promise<{ id: string; status: CameraStatusValue; lastSeenAt: Date }> {
+    const camera = await this.findOne(userId, id);
+    const now = new Date();
+
+    // Callback invoked when plugin status transitions (e.g. CONNECTING -> CONNECTED / ERROR)
+    const onStatusChange = async (newStatus: CameraStatusValue) => {
+      const timestamp = new Date();
+      try {
+        await this.prisma.camera.update({
+          where: { id },
+          data: {
+            status: newStatus as CameraStatus,
+            lastSeenAt: timestamp,
+          },
+        });
+      } catch (err) {
+        this.logger.warn(
+          `Failed to persist status transition for camera ${id}: ${(err as Error).message}`,
+        );
+      }
+      this.eventsService.emitCameraStatus(id, newStatus, timestamp);
+    };
+
+    // Broadcast immediate CONNECTING state
+    this.eventsService.emitCameraStatus(id, 'CONNECTING', now);
+    await this.prisma.camera.update({
+      where: { id },
+      data: {
+        status: CameraStatus.CONNECTING,
+        lastSeenAt: now,
+      },
+    });
+
+    // Delegate connect to PluginManager
+    const finalStatus = await this.pluginManager.connect(
+      id,
+      camera.pluginType,
+      camera.connectionConfig,
+      onStatusChange,
+    );
+
+    const updatedTime = new Date();
+    await this.prisma.camera.update({
+      where: { id },
+      data: {
+        status: finalStatus as CameraStatus,
+        lastSeenAt: updatedTime,
+      },
+    });
+    this.eventsService.emitCameraStatus(id, finalStatus, updatedTime);
+
+    return {
+      id,
+      status: finalStatus,
+      lastSeenAt: updatedTime,
+    };
+  }
+
+  /**
+   * Triggers disconnection via plugin and broadcasts status
+   */
+  async disconnect(
+    userId: string,
+    id: string,
+  ): Promise<{ id: string; status: CameraStatusValue }> {
+    await this.findOne(userId, id);
+
+    const finalStatus = await this.pluginManager.disconnect(id);
+    const now = new Date();
+
+    await this.prisma.camera.update({
+      where: { id },
+      data: {
+        status: finalStatus as CameraStatus,
+        lastSeenAt: now,
+      },
+    });
+
+    this.eventsService.emitCameraStatus(id, finalStatus, now);
+
+    return {
+      id,
+      status: finalStatus,
+    };
+  }
+
+  /**
+   * Retrieves live status of a camera from its plugin
+   */
+  async getStatus(
+    userId: string,
+    id: string,
+  ): Promise<{ id: string; status: CameraStatusValue }> {
+    const camera = await this.findOne(userId, id);
+    const status = await this.pluginManager.getStatus(
+      id,
+      camera.status as CameraStatusValue,
+    );
+
+    return {
+      id,
+      status,
+    };
   }
 
   private formatCamera(camera: Camera): FormattedCamera {

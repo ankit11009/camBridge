@@ -26,6 +26,12 @@ export interface UpdateCameraInput {
   connectionConfig?: Record<string, unknown>;
 }
 
+export interface CameraStatusResponse {
+  id: string;
+  status: CameraStatus;
+  lastSeenAt?: string;
+}
+
 export const camerasApi = {
   list: async (): Promise<Camera[]> => {
     const res = await apiClient.get<Camera[]>('/cameras');
@@ -49,6 +55,21 @@ export const camerasApi = {
 
   delete: async (id: string): Promise<{ success: boolean; id: string }> => {
     const res = await apiClient.delete<{ success: boolean; id: string }>(`/cameras/${id}`);
+    return res.data;
+  },
+
+  connect: async (id: string): Promise<CameraStatusResponse> => {
+    const res = await apiClient.post<CameraStatusResponse>(`/cameras/${id}/connect`);
+    return res.data;
+  },
+
+  disconnect: async (id: string): Promise<CameraStatusResponse> => {
+    const res = await apiClient.post<CameraStatusResponse>(`/cameras/${id}/disconnect`);
+    return res.data;
+  },
+
+  getStatus: async (id: string): Promise<CameraStatusResponse> => {
+    const res = await apiClient.get<CameraStatusResponse>(`/cameras/${id}/status`);
     return res.data;
   },
 };

@@ -2,6 +2,8 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { CamerasService } from './cameras.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { EncryptionService } from '../common/crypto/encryption.service';
+import { PluginManagerService } from '../plugins/plugin-manager.service';
+import { EventsService } from '../events/events.service';
 import { PluginType, CameraStatus } from '@prisma/client';
 import { NotFoundException } from '@nestjs/common';
 
@@ -19,6 +21,16 @@ describe('CamerasService', () => {
   let encryption: {
     encryptConfig: jest.Mock;
     decryptConfig: jest.Mock;
+  };
+  let pluginManager: {
+    connect: jest.Mock;
+    disconnect: jest.Mock;
+    getStatus: jest.Mock;
+    removePlugin: jest.Mock;
+  };
+  let eventsService: {
+    emitCameraStatus: jest.Mock;
+    recordAndEmitEvent: jest.Mock;
   };
 
   beforeEach(async () => {
@@ -39,6 +51,18 @@ describe('CamerasService', () => {
       decryptConfig: jest.fn().mockImplementation((cfg) => cfg),
     };
 
+    pluginManager = {
+      connect: jest.fn().mockResolvedValue('CONNECTED'),
+      disconnect: jest.fn().mockResolvedValue('DISCONNECTED'),
+      getStatus: jest.fn().mockResolvedValue('CONNECTED'),
+      removePlugin: jest.fn().mockResolvedValue(undefined),
+    };
+
+    eventsService = {
+      emitCameraStatus: jest.fn(),
+      recordAndEmitEvent: jest.fn(),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         CamerasService,
@@ -49,6 +73,14 @@ describe('CamerasService', () => {
         {
           provide: EncryptionService,
           useValue: encryption,
+        },
+        {
+          provide: PluginManagerService,
+          useValue: pluginManager,
+        },
+        {
+          provide: EventsService,
+          useValue: eventsService,
         },
       ],
     }).compile();
@@ -136,6 +168,94 @@ describe('CamerasService', () => {
       await expect(service.findOne('user-1', 'cam-999')).rejects.toThrow(
         NotFoundException,
       );
+    });
+  });
+
+  describe('connect', () => {
+    it('should delegate to pluginManager and emit status', async () => {
+      const mockCam = {
+        id: 'cam-1',
+        ownerId: 'user-1',
+        name: 'Backyard',
+        pluginType: PluginType.MOCK,
+        connectionConfig: {},
+        status: CameraStatus.UNKNOWN,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      prisma.camera.findFirst.mockResolvedValue(mockCam);
+      prisma.camera.update.mockResolvedValue({
+        ...mockCam,
+        status: CameraStatus.CONNECTED,
+      });
+
+      const res = await service.connect('user-1', 'cam-1');
+
+      expect(pluginManager.connect).toHaveBeenCalled();
+      expect(eventsService.emitCameraStatus).toHaveBeenCalledWith(
+        'cam-1',
+        'CONNECTING',
+        expect.any(Date),
+      );
+      expect(eventsService.emitCameraStatus).toHaveBeenCalledWith(
+        'cam-1',
+        'CONNECTED',
+        expect.any(Date),
+      );
+      expect(res.status).toBe('CONNECTED');
+    });
+  });
+
+  describe('disconnect', () => {
+    it('should disconnect via pluginManager and emit DISCONNECTED', async () => {
+      const mockCam = {
+        id: 'cam-1',
+        ownerId: 'user-1',
+        name: 'Backyard',
+        pluginType: PluginType.MOCK,
+        connectionConfig: {},
+        status: CameraStatus.CONNECTED,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      prisma.camera.findFirst.mockResolvedValue(mockCam);
+      prisma.camera.update.mockResolvedValue({
+        ...mockCam,
+        status: CameraStatus.DISCONNECTED,
+      });
+
+      const res = await service.disconnect('user-1', 'cam-1');
+
+      expect(pluginManager.disconnect).toHaveBeenCalledWith('cam-1');
+      expect(eventsService.emitCameraStatus).toHaveBeenCalledWith(
+        'cam-1',
+        'DISCONNECTED',
+        expect.any(Date),
+      );
+      expect(res.status).toBe('DISCONNECTED');
+    });
+  });
+
+  describe('getStatus', () => {
+    it('should return current plugin status', async () => {
+      const mockCam = {
+        id: 'cam-1',
+        ownerId: 'user-1',
+        name: 'Backyard',
+        pluginType: PluginType.MOCK,
+        connectionConfig: {},
+        status: CameraStatus.CONNECTED,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      prisma.camera.findFirst.mockResolvedValue(mockCam);
+      pluginManager.getStatus.mockResolvedValue('CONNECTED');
+
+      const res = await service.getStatus('user-1', 'cam-1');
+      expect(res.status).toBe('CONNECTED');
     });
   });
 });

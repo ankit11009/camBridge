@@ -56,4 +56,30 @@ export class CamerasController {
   async remove(@CurrentUser('userId') userId: string, @Param('id') id: string) {
     return this.camerasService.remove(userId, id);
   }
+
+  @Post(':id/connect')
+  @HttpCode(HttpStatus.OK)
+  async connect(
+    @CurrentUser('userId') userId: string,
+    @Param('id') id: string,
+  ) {
+    return this.camerasService.connect(userId, id);
+  }
+
+  @Post(':id/disconnect')
+  @HttpCode(HttpStatus.OK)
+  async disconnect(
+    @CurrentUser('userId') userId: string,
+    @Param('id') id: string,
+  ) {
+    return this.camerasService.disconnect(userId, id);
+  }
+
+  @Get(':id/status')
+  async getStatus(
+    @CurrentUser('userId') userId: string,
+    @Param('id') id: string,
+  ) {
+    return this.camerasService.getStatus(userId, id);
+  }
 }
