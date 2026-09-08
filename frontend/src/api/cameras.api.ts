@@ -125,19 +125,36 @@ export const camerasApi = {
     id: string,
     limit?: number,
     type?: string,
+    search?: string,
   ): Promise<CameraEvent[]> => {
     const params: Record<string, string | number> = {};
     if (limit) params.limit = limit;
     if (type) params.type = type;
+    if (search) params.search = search;
     const res = await apiClient.get<CameraEvent[]>(`/cameras/${id}/events`, {
       params,
     });
     return res.data;
   },
 
+  detectCamera: async (id: string): Promise<CameraEvent> => {
+    const res = await apiClient.post<CameraEvent>(`/cameras/${id}/detect`);
+    return res.data;
+  },
+
+  detectRecording: async (
+    cameraId: string,
+    recordingId: string,
+  ): Promise<CameraEvent> => {
+    const res = await apiClient.post<CameraEvent>(
+      `/cameras/${cameraId}/recordings/${recordingId}/detect`,
+    );
+    return res.data;
+  },
+
   triggerEvent: async (
     id: string,
-    type: 'MOTION' | 'STATUS' = 'MOTION',
+    type: 'MOTION' | 'STATUS' | 'DETECTION' = 'MOTION',
     payload?: Record<string, any>,
   ): Promise<CameraEvent> => {
     const res = await apiClient.post<CameraEvent>(

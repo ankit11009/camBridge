@@ -265,9 +265,19 @@ export class CamerasService {
     cameraId: string,
     limit?: number,
     type?: EventType,
+    search?: string,
+    startDate?: string,
+    endDate?: string,
   ) {
     await this.findOne(userId, cameraId);
-    return this.eventsService.getEvents(cameraId, limit, type);
+    return this.eventsService.getEvents(
+      cameraId,
+      limit,
+      type,
+      search,
+      startDate,
+      endDate,
+    );
   }
 
   /**

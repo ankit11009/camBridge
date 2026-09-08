@@ -104,9 +104,20 @@ export class CamerasController {
     @Param('id') id: string,
     @Query('limit') limit?: string,
     @Query('type') type?: EventType,
+    @Query('search') search?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
   ) {
     const limitNum = limit ? parseInt(limit, 10) : 50;
-    return this.camerasService.getCameraEvents(userId, id, limitNum, type);
+    return this.camerasService.getCameraEvents(
+      userId,
+      id,
+      limitNum,
+      type,
+      search,
+      startDate,
+      endDate,
+    );
   }
 
   @Post(':id/events/trigger')

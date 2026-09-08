@@ -60,15 +60,37 @@ export class EventsService {
     cameraId: string,
     limit = 50,
     type?: 'STATUS' | 'MOTION' | 'DETECTION',
+    search?: string,
+    startDate?: Date | string,
+    endDate?: Date | string,
   ) {
     const where: any = { cameraId };
     if (type) {
       where.type = type;
     }
-    return this.prisma.event.findMany({
+    if (startDate || endDate) {
+      where.createdAt = {};
+      if (startDate) {
+        where.createdAt.gte = new Date(startDate);
+      }
+      if (endDate) {
+        where.createdAt.lte = new Date(endDate);
+      }
+    }
+    const events = await this.prisma.event.findMany({
       where,
       orderBy: { createdAt: 'desc' },
       take: Math.min(Math.max(1, limit), 100),
     });
+
+    if (search && search.trim()) {
+      const q = search.trim().toLowerCase();
+      return events.filter((ev) => {
+        const payloadStr = JSON.stringify(ev.payload || {}).toLowerCase();
+        return ev.type.toLowerCase().includes(q) || payloadStr.includes(q);
+      });
+    }
+
+    return events;
   }
 }

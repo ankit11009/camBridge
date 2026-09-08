@@ -23,7 +23,7 @@ export function Navbar() {
             <div className="text-base font-bold tracking-tight text-white flex items-center gap-2">
               CamBridge
               <span className="text-[10px] px-2 py-0.5 rounded-full font-medium bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                Phase 6
+                Phase 7
               </span>
             </div>
             <div className="text-[11px] text-slate-400">Plugin Camera Platform</div>

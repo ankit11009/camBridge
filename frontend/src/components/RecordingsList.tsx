@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { camerasApi, Recording } from '../api/cameras.api';
+import { useNotificationStore } from '../store/notificationStore';
 import {
   Film,
   Play,
@@ -11,6 +12,8 @@ import {
   Download,
   AlertCircle,
   RefreshCw,
+  Sparkles,
+  Loader2,
 } from 'lucide-react';
 
 interface RecordingsListProps {
@@ -18,9 +21,37 @@ interface RecordingsListProps {
 }
 
 export function RecordingsList({ cameraId }: RecordingsListProps) {
+  const queryClient = useQueryClient();
   const [selectedRecording, setSelectedRecording] = useState<Recording | null>(
     null,
   );
+  const [analyzingId, setAnalyzingId] = useState<string | null>(null);
+
+  const detectRecordingMutation = useMutation({
+    mutationFn: (recordingId: string) =>
+      camerasApi.detectRecording(cameraId, recordingId),
+    onSuccess: (event, recordingId) => {
+      setAnalyzingId(null);
+      queryClient.invalidateQueries({ queryKey: ['camera-events', cameraId] });
+      const label =
+        event.payload?.primaryDetection?.label ||
+        event.payload?.detections?.[0]?.label ||
+        'person';
+      useNotificationStore.getState().addNotification({
+        type: 'info',
+        title: 'Clip AI Analyzed',
+        message: `Detected ${label} in recorded clip ${recordingId.slice(0, 8)}. Event added to timeline.`,
+      });
+    },
+    onError: (err: any) => {
+      setAnalyzingId(null);
+      useNotificationStore.getState().addNotification({
+        type: 'error',
+        title: 'Analysis Failed',
+        message: err.response?.data?.message || 'Failed to analyze recording clip',
+      });
+    },
+  });
 
   const {
     data: recordings,
@@ -164,13 +195,32 @@ export function RecordingsList({ cameraId }: RecordingsListProps) {
                 </div>
               </div>
 
-              <button
-                onClick={() => setSelectedRecording(recording)}
-                className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white border border-indigo-500/30 text-xs font-semibold transition-all group-hover:border-indigo-500"
-              >
-                <Play className="w-3.5 h-3.5 fill-current" />
-                Play Clip
-              </button>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => setSelectedRecording(recording)}
+                  className="flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-lg bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white border border-indigo-500/30 text-xs font-semibold transition-all group-hover:border-indigo-500"
+                >
+                  <Play className="w-3.5 h-3.5 fill-current" />
+                  Play Clip
+                </button>
+
+                <button
+                  onClick={() => {
+                    setAnalyzingId(recording.id);
+                    detectRecordingMutation.mutate(recording.id);
+                  }}
+                  disabled={analyzingId === recording.id}
+                  className="flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-lg bg-violet-500/10 hover:bg-violet-500/20 text-violet-300 border border-violet-500/20 text-xs font-semibold transition-all disabled:opacity-50"
+                  title="Run AI detection analysis on this clip"
+                >
+                  {analyzingId === recording.id ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Sparkles className="w-3.5 h-3.5 text-violet-400" />
+                  )}
+                  {analyzingId === recording.id ? 'Analyzing...' : 'AI Inspect'}
+                </button>
+              </div>
             </div>
           ))}
         </div>

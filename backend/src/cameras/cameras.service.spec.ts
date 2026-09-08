@@ -360,6 +360,9 @@ describe('CamerasService', () => {
         'cam-1',
         20,
         undefined,
+        undefined,
+        undefined,
+        undefined,
       );
     });
   });

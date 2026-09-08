@@ -9,6 +9,7 @@ vi.mock('../api/cameras.api', () => ({
   camerasApi: {
     getEvents: vi.fn(),
     triggerEvent: vi.fn(),
+    detectCamera: vi.fn(),
   },
 }));
 
@@ -90,6 +91,69 @@ describe('EventTimeline Component', () => {
         'MOTION',
         expect.any(Object),
       );
+    });
+  });
+
+  it('triggers AI detection when Run AI Detection is clicked', async () => {
+    (camerasApi.getEvents as any).mockResolvedValue([]);
+    (camerasApi.detectCamera as any).mockResolvedValue({
+      id: 'ev-detect',
+      cameraId: 'cam-101',
+      type: 'DETECTION',
+      payload: {
+        primaryDetection: {
+          label: 'person',
+          confidence: 0.94,
+          box: { x: 100, y: 50, width: 150, height: 300 },
+        },
+      },
+      createdAt: new Date().toISOString(),
+    });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <EventTimeline cameraId="cam-101" pluginType="MOCK" />
+      </QueryClientProvider>,
+    );
+
+    const btn = screen.getByText('Run AI Detection');
+    fireEvent.click(btn);
+
+    await waitFor(() => {
+      expect(camerasApi.detectCamera).toHaveBeenCalledWith('cam-101');
+    });
+  });
+
+  it('filters by DETECTION event type and displays detection details', async () => {
+    (camerasApi.getEvents as any).mockResolvedValue([
+      {
+        id: 'ev-det-1',
+        cameraId: 'cam-101',
+        type: 'DETECTION',
+        payload: {
+          primaryDetection: {
+            label: 'person',
+            confidence: 0.94,
+            box: { x: 140, y: 85, width: 190, height: 395 },
+          },
+        },
+        createdAt: new Date().toISOString(),
+      },
+    ]);
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <EventTimeline cameraId="cam-101" pluginType="MOCK" />
+      </QueryClientProvider>,
+    );
+
+    const filterBtn = screen.getByRole('button', { name: 'Detection' });
+    fireEvent.click(filterBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText('DETECTION')).toBeDefined();
+      expect(screen.getByText(/AI detected person/i)).toBeDefined();
+      expect(screen.getByText(/box \[140, 85/i)).toBeDefined();
     });
   });
 });
