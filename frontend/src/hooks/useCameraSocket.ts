@@ -26,7 +26,7 @@ export function useCameraSocket(activeCameraId?: string) {
         useNotificationStore.getState().addNotification({
           type: 'warning',
           title: 'Camera Disconnected',
-          message: `Camera ${data.cameraId.slice(0, 8)} disconnected. Auto-reconnection scheduled.`,
+          message: `Camera ${data.cameraId.slice(0, 8)} has been disconnected.`,
         });
       } else if (data.status === 'ERROR') {
         useNotificationStore.getState().addNotification({

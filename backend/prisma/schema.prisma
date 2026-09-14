@@ -54,7 +54,7 @@ enum EventType {
 
 model Event {
   id        String    @id @default(uuid())
-  camera    Camera    @relation(fields: [cameraId], references: [id])
+  camera    Camera    @relation(fields: [cameraId], references: [id], onDelete: Cascade)
   cameraId  String
   type      EventType
   payload   Json
@@ -70,7 +70,7 @@ enum RecordingTrigger {
 
 model Recording {
   id          String           @id @default(uuid())
-  camera      Camera           @relation(fields: [cameraId], references: [id])
+  camera      Camera           @relation(fields: [cameraId], references: [id], onDelete: Cascade)
   cameraId    String
   startedAt   DateTime
   endedAt     DateTime?

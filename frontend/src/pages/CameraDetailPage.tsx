@@ -170,7 +170,21 @@ export function CameraDetailPage() {
     mutationFn: () => camerasApi.delete(id!),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['cameras'] });
+      useNotificationStore.getState().addNotification({
+        type: 'info',
+        title: 'Camera Deleted',
+        message: `Camera ${camera?.name || id} was successfully removed.`,
+      });
       navigate('/');
+    },
+    onError: (err: any) => {
+      const msg = err.response?.data?.message || 'Failed to delete camera';
+      setErrorMsg(msg);
+      useNotificationStore.getState().addNotification({
+        type: 'error',
+        title: 'Delete Failed',
+        message: msg,
+      });
     },
   });
 
@@ -223,10 +237,20 @@ export function CameraDetailPage() {
               deleteMutation.mutate();
             }
           }}
-          className="flex items-center gap-1.5 text-xs text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 py-1.5 px-3 rounded-lg border border-rose-500/20 transition-colors"
+          disabled={deleteMutation.isPending}
+          className="flex items-center gap-1.5 text-xs text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 py-1.5 px-3 rounded-lg border border-rose-500/20 transition-colors disabled:opacity-50"
         >
-          <Trash2 className="w-3.5 h-3.5" />
-          Delete Camera
+          {deleteMutation.isPending ? (
+            <>
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              Deleting...
+            </>
+          ) : (
+            <>
+              <Trash2 className="w-3.5 h-3.5" />
+              Delete Camera
+            </>
+          )}
         </button>
       </div>
 

@@ -18,6 +18,7 @@ export interface FormattedCamera extends Omit<Camera, 'connectionConfig'> {
 @Injectable()
 export class CamerasService {
   private readonly logger = new Logger(CamerasService.name);
+  private readonly manualDisconnects = new Set<string>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -100,12 +101,29 @@ export class CamerasService {
     // Verify existence and ownership
     await this.findOne(userId, id);
 
+    this.manualDisconnects.delete(id);
+    this.reconnectionService.cancelReconnection(id);
+
+    // Stop active recording session if any
+    if (this.recordingsService.isRecording(id)) {
+      try {
+        await this.recordingsService.stopRecording(userId, id);
+      } catch (err) {
+        this.logger.warn(
+          `Failed to stop active recording during camera removal: ${(err as Error).message}`,
+        );
+      }
+    }
+
     // Disconnect and remove plugin instance
     await this.pluginManager.removePlugin(id);
 
-    await this.prisma.camera.delete({
-      where: { id },
-    });
+    // Delete associated events, recordings, and the camera in a transaction
+    await this.prisma.$transaction([
+      this.prisma.event.deleteMany({ where: { cameraId: id } }),
+      this.prisma.recording.deleteMany({ where: { cameraId: id } }),
+      this.prisma.camera.delete({ where: { id } }),
+    ]);
 
     return { success: true, id };
   }
@@ -125,6 +143,9 @@ export class CamerasService {
     const camera = await this.findOne(userId, id);
     const now = new Date();
 
+    this.manualDisconnects.delete(id);
+    this.reconnectionService.cancelReconnection(id);
+
     // Callback invoked when plugin status transitions (e.g. CONNECTING -> CONNECTED / ERROR)
     const onStatusChange = async (newStatus: CameraStatusValue) => {
       const timestamp = new Date();
@@ -141,7 +162,10 @@ export class CamerasService {
           `Failed to persist status transition for camera ${id}: ${(err as Error).message}`,
         );
       }
-      if (newStatus === 'DISCONNECTED' || newStatus === 'ERROR') {
+      if (this.manualDisconnects.has(id)) {
+        // Manual intentional disconnect: do NOT schedule reconnection
+        this.reconnectionService.cancelReconnection(id);
+      } else if (newStatus === 'DISCONNECTED' || newStatus === 'ERROR') {
         this.reconnectionService.scheduleReconnection(camera.ownerId, id, () =>
           this.connect(camera.ownerId, id),
         );
@@ -199,8 +223,10 @@ export class CamerasService {
   ): Promise<{ id: string; status: CameraStatusValue }> {
     await this.findOne(userId, id);
 
+    this.manualDisconnects.add(id);
     this.reconnectionService.cancelReconnection(id);
     const finalStatus = await this.pluginManager.disconnect(id);
+    this.reconnectionService.cancelReconnection(id);
     const now = new Date();
 
     await this.prisma.camera.update({

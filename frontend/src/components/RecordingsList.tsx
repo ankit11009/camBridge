@@ -26,6 +26,7 @@ export function RecordingsList({ cameraId }: RecordingsListProps) {
     null,
   );
   const [analyzingId, setAnalyzingId] = useState<string | null>(null);
+  const [videoError, setVideoError] = useState(false);
 
   const detectRecordingMutation = useMutation({
     mutationFn: (recordingId: string) =>
@@ -119,10 +120,12 @@ export function RecordingsList({ cameraId }: RecordingsListProps) {
   };
 
   const getFullVideoUrl = (videoUrl: string) => {
-    const apiBase =
-      import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
+    const apiBase = (
+      import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000'
+    ).replace(/\/+$/, '');
     if (videoUrl.startsWith('http')) return videoUrl;
-    return `${apiBase}${videoUrl}`;
+    const cleanUrl = videoUrl.startsWith('/') ? videoUrl : `/${videoUrl}`;
+    return `${apiBase}${cleanUrl}`;
   };
 
   return (
@@ -197,11 +200,24 @@ export function RecordingsList({ cameraId }: RecordingsListProps) {
 
               <div className="grid grid-cols-2 gap-2">
                 <button
-                  onClick={() => setSelectedRecording(recording)}
-                  className="flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-lg bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white border border-indigo-500/30 text-xs font-semibold transition-all group-hover:border-indigo-500"
+                  onClick={() => {
+                    setVideoError(false);
+                    setSelectedRecording(recording);
+                  }}
+                  disabled={!recording.finishedAt}
+                  className="flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-lg bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white border border-indigo-500/30 text-xs font-semibold transition-all group-hover:border-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <Play className="w-3.5 h-3.5 fill-current" />
-                  Play Clip
+                  {recording.finishedAt ? (
+                    <>
+                      <Play className="w-3.5 h-3.5 fill-current" />
+                      Play Clip
+                    </>
+                  ) : (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      Recording...
+                    </>
+                  )}
                 </button>
 
                 <button
@@ -238,22 +254,49 @@ export function RecordingsList({ cameraId }: RecordingsListProps) {
                 </span>
               </div>
               <button
-                onClick={() => setSelectedRecording(null)}
+                onClick={() => {
+                  setSelectedRecording(null);
+                  setVideoError(false);
+                }}
                 className="p-1 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="relative aspect-video bg-black rounded-xl overflow-hidden border border-slate-800">
-              <video
-                controls
-                autoPlay
-                className="w-full h-full object-contain"
-                src={getFullVideoUrl(selectedRecording.videoUrl)}
-              >
-                Your browser does not support HTML5 video playback.
-              </video>
+            <div className="relative aspect-video bg-black rounded-xl overflow-hidden border border-slate-800 flex items-center justify-center">
+              {videoError ? (
+                <div className="p-6 text-center text-xs text-rose-400 space-y-2">
+                  <AlertCircle className="w-8 h-8 mx-auto text-rose-500" />
+                  <p className="font-semibold">Unable to stream video preview inline.</p>
+                  <p className="text-slate-400 text-[11px]">
+                    You can download the MP4 file directly to view it in your media player.
+                  </p>
+                  <a
+                    href={getFullVideoUrl(selectedRecording.videoUrl)}
+                    download
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold mt-2 transition-colors"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    Download MP4
+                  </a>
+                </div>
+              ) : (
+                <video
+                  key={selectedRecording.id}
+                  controls
+                  autoPlay
+                  playsInline
+                  preload="auto"
+                  className="w-full h-full object-contain"
+                  src={getFullVideoUrl(selectedRecording.videoUrl)}
+                  onError={() => setVideoError(true)}
+                >
+                  Your browser does not support HTML5 video playback.
+                </video>
+              )}
             </div>
 
             <div className="flex items-center justify-between pt-2 text-xs text-slate-400">

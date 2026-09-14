@@ -12,12 +12,19 @@ import { NotFoundException } from '@nestjs/common';
 describe('CamerasService', () => {
   let service: CamerasService;
   let prisma: {
+    $transaction: jest.Mock;
     camera: {
       create: jest.Mock;
       findMany: jest.Mock;
       findFirst: jest.Mock;
       update: jest.Mock;
       delete: jest.Mock;
+    };
+    event: {
+      deleteMany: jest.Mock;
+    };
+    recording: {
+      deleteMany: jest.Mock;
     };
   };
   let encryption: {
@@ -39,6 +46,8 @@ describe('CamerasService', () => {
   };
   let recordingsService: {
     handleMotionEvent: jest.Mock;
+    isRecording: jest.Mock;
+    stopRecording: jest.Mock;
   };
   let reconnectionService: {
     scheduleReconnection: jest.Mock;
@@ -47,12 +56,19 @@ describe('CamerasService', () => {
 
   beforeEach(async () => {
     prisma = {
+      $transaction: jest.fn().mockImplementation((promises) => Promise.all(promises)),
       camera: {
         create: jest.fn(),
         findMany: jest.fn(),
         findFirst: jest.fn(),
         update: jest.fn(),
         delete: jest.fn(),
+      },
+      event: {
+        deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      },
+      recording: {
+        deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
       },
     };
 
@@ -96,6 +112,8 @@ describe('CamerasService', () => {
 
     recordingsService = {
       handleMotionEvent: jest.fn().mockResolvedValue(undefined),
+      isRecording: jest.fn().mockReturnValue(false),
+      stopRecording: jest.fn().mockResolvedValue({}),
     };
 
     reconnectionService = {
@@ -401,6 +419,31 @@ describe('CamerasService', () => {
         { custom: true },
       );
       expect(res).toBeDefined();
+    });
+  });
+
+  describe('remove', () => {
+    it('removes plugin, stops active recording, and deletes camera with dependents in a transaction', async () => {
+      const mockCam = {
+        id: 'cam-1',
+        ownerId: 'user-1',
+        name: 'Backyard',
+        pluginType: PluginType.MOCK,
+        connectionConfig: {},
+        status: CameraStatus.CONNECTED,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      prisma.camera.findFirst.mockResolvedValue(mockCam);
+      recordingsService.isRecording.mockReturnValue(true);
+
+      const result = await service.remove('user-1', 'cam-1');
+
+      expect(reconnectionService.cancelReconnection).toHaveBeenCalledWith('cam-1');
+      expect(recordingsService.stopRecording).toHaveBeenCalledWith('user-1', 'cam-1');
+      expect(pluginManager.removePlugin).toHaveBeenCalledWith('cam-1');
+      expect(prisma.$transaction).toHaveBeenCalled();
+      expect(result).toEqual({ success: true, id: 'cam-1' });
     });
   });
 });

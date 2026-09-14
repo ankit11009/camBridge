@@ -73,17 +73,44 @@ export class RecordingsController {
     const range = req.headers.range;
 
     res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader(
+      'Access-Control-Allow-Headers',
+      'Range, Accept, Origin, Content-Type',
+    );
+    res.setHeader(
+      'Access-Control-Expose-Headers',
+      'Content-Range, Content-Length, Accept-Ranges',
+    );
     res.setHeader('Content-Type', 'video/mp4');
     res.setHeader('Accept-Ranges', 'bytes');
 
     if (range) {
-      // Parse Range header e.g. "bytes=0-1024"
+      // Parse Range header e.g. "bytes=0-1024" or "bytes=0-" or "bytes=-500"
       const parts = range.replace(/bytes=/, '').split('-');
-      const start = parseInt(parts[0], 10);
-      const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+      let start: number;
+      let end: number;
 
-      if (start >= fileSize || end >= fileSize) {
-        res.status(HttpStatus.REQUESTED_RANGE_NOT_SATISFIABLE).send();
+      if (parts[0] === '' && parts[1] !== '') {
+        // Suffix range e.g. "bytes=-500" (last 500 bytes)
+        const suffixLength = parseInt(parts[1], 10);
+        start = Math.max(0, fileSize - suffixLength);
+        end = fileSize - 1;
+      } else {
+        start = parseInt(parts[0], 10);
+        end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+      }
+
+      if (
+        isNaN(start) ||
+        isNaN(end) ||
+        start < 0 ||
+        start >= fileSize ||
+        end >= fileSize ||
+        start > end
+      ) {
+        res.status(HttpStatus.REQUESTED_RANGE_NOT_SATISFIABLE);
+        res.setHeader('Content-Range', `bytes */${fileSize}`);
+        res.send();
         return;
       }
 
@@ -94,11 +121,33 @@ export class RecordingsController {
       res.setHeader('Content-Range', `bytes ${start}-${end}/${fileSize}`);
       res.setHeader('Content-Length', chunksize);
 
+      fileStream.on('error', (err) => {
+        if (!res.headersSent) {
+          res.status(HttpStatus.INTERNAL_SERVER_ERROR).send();
+        }
+      });
+
+      req.on('close', () => {
+        fileStream.destroy();
+      });
+
       fileStream.pipe(res);
     } else {
       res.status(HttpStatus.OK);
       res.setHeader('Content-Length', fileSize);
-      fs.createReadStream(filePath).pipe(res);
+      const fileStream = fs.createReadStream(filePath);
+
+      fileStream.on('error', (err) => {
+        if (!res.headersSent) {
+          res.status(HttpStatus.INTERNAL_SERVER_ERROR).send();
+        }
+      });
+
+      req.on('close', () => {
+        fileStream.destroy();
+      });
+
+      fileStream.pipe(res);
     }
   }
 }

@@ -4,6 +4,7 @@ import { Camera, camerasApi } from '../api/cameras.api';
 import { CameraStatusBadge } from './CameraStatusBadge';
 import { Video, Trash2, Settings, AlertCircle, Power, Loader2 } from 'lucide-react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useNotificationStore } from '../store/notificationStore';
 
 interface Props {
   camera: Camera;
@@ -37,6 +38,18 @@ export function CameraCard({ camera }: Props) {
     mutationFn: () => camerasApi.delete(camera.id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['cameras'] });
+      useNotificationStore.getState().addNotification({
+        type: 'info',
+        title: 'Camera Deleted',
+        message: `Camera ${camera.name} was successfully removed.`,
+      });
+    },
+    onError: (err: any) => {
+      useNotificationStore.getState().addNotification({
+        type: 'error',
+        title: 'Delete Failed',
+        message: err.response?.data?.message || 'Failed to delete camera',
+      });
     },
   });
 
