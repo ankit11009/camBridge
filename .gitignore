@@ -46,3 +46,9 @@ frontend/dist/
 
 # Local archive
 cambridge-antigravity-package.zip
+
+# Local Python detector environment
+.venv/
+__pycache__/
+
+backend/models/*.pt

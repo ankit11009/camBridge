@@ -18,7 +18,7 @@ export class StreamingController {
   constructor(private readonly streamingService: StreamingService) {}
 
   @Get(':cameraId/:file')
-  getStreamFile(
+  async getStreamFile(
     @Param('cameraId') cameraId: string,
     @Param('file') file: string,
     @Res() res: Response,
@@ -27,6 +27,18 @@ export class StreamingController {
     const safeFileName = path.basename(file);
     const streamDir = this.streamingService.getStreamDirectory(cameraId);
     const filePath = path.join(streamDir, safeFileName);
+
+    // Connect returns before FFmpeg publishes its first segment. Hold only
+    // that initial playlist request briefly instead of triggering HLS backoff.
+    if (safeFileName === 'stream.m3u8') {
+      const deadline = Date.now() + 8000;
+      while (!fs.existsSync(filePath) &&
+        this.streamingService.isStreaming(cameraId) &&
+        Date.now() < deadline && !res.destroyed) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      if (res.destroyed) return;
+    }
 
     if (!fs.existsSync(filePath)) {
       throw new NotFoundException(

@@ -10,12 +10,10 @@ import {
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { Logger } from '@nestjs/common';
+import { corsOptions } from '../common/cors.config';
 
 @WebSocketGateway({
-  cors: {
-    origin: '*',
-    credentials: true,
-  },
+  cors: corsOptions,
 })
 export class EventsGateway
   implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
@@ -78,7 +76,6 @@ export class EventsGateway
 
     if (this.server) {
       // Broadcast to specific room for detailed camera page
-      this.server.to(`camera:${cameraId}`).emit('camera:status', payload);
       // Also broadcast globally so dashboard list view updates immediately
       this.server.emit('camera:status', payload);
     }
@@ -100,7 +97,6 @@ export class EventsGateway
     };
 
     if (this.server) {
-      this.server.to(`camera:${cameraId}`).emit('camera:event', eventData);
       this.server.emit('camera:event', eventData);
     }
   }

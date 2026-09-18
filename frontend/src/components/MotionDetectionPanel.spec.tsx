@@ -1,0 +1,22 @@
+import { afterEach, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MotionDetectionPanel } from './MotionDetectionPanel';
+import { detectionApi } from '../api/detection.api';
+vi.mock('../api/detection.api', () => ({ detectionApi: { getStatus: vi.fn(), toggleDetection: vi.fn() } }));
+afterEach(() => { cleanup(); vi.clearAllMocks(); });
+it('starts and stops monitoring with the selected zone', async () => {
+  const zone = { x: .1, y: .2, width: .5, height: .5 };
+  vi.mocked(detectionApi.getStatus).mockResolvedValue({ enabled: false, running: false, intervalMs: 2000, zone });
+  vi.mocked(detectionApi.toggleDetection).mockImplementation(async (_id, enabled) => ({ enabled, running: enabled, intervalMs: 2000, zone }));
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(<QueryClientProvider client={client}><MotionDetectionPanel cameraId="cam-1" /></QueryClientProvider>);
+  await waitFor(() => expect(screen.getByText(/Zone: left 10%/)).toBeDefined());
+  fireEvent.click(screen.getByText('Start Detection'));
+  await screen.findByText('Stop Detection');
+  expect(detectionApi.toggleDetection).toHaveBeenCalledWith('cam-1', true, 2000, zone);
+  fireEvent.click(screen.getByText('Stop Detection'));
+  await screen.findByText('Start Detection');
+  expect(detectionApi.toggleDetection).toHaveBeenLastCalledWith('cam-1', false, 2000, zone);
+  client.clear();
+});

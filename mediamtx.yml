@@ -1,0 +1,34 @@
+###############################################
+# MediaMTX configuration for CamBridge dev
+###############################################
+
+# ─── RTSP server ───
+rtsp: true
+rtspAddress: :8554
+
+# ─── API ───
+api: true
+apiAddress: :9997
+
+# ─── Paths ───
+paths:
+  # Primary webcam path using macOS AVFoundation
+  webcam:
+    runOnInit: ffmpeg -f avfoundation -framerate 30 -video_size 1280x720 -pix_fmt uyvy422 -i "0" -c:v libx264 -preset ultrafast -tune zerolatency -pix_fmt yuv420p -f rtsp rtsp://127.0.0.1:8554/webcam
+    runOnInitRestart: yes
+
+  # Aliases pointing to webcam so both /mystream and /camera work
+  mystream:
+    source: rtsp://127.0.0.1:8554/webcam
+    sourceOnDemand: yes
+
+  camera:
+    source: rtsp://127.0.0.1:8554/webcam
+    sourceOnDemand: yes
+
+  # Sample video file path
+  sample:
+    runOnInit: ffmpeg -re -stream_loop -1 -i sample.mp4 -c copy -f rtsp rtsp://127.0.0.1:8554/sample
+    runOnInitRestart: yes
+
+  all_others:

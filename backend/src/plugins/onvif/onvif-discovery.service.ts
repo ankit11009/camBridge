@@ -1,4 +1,5 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
+import { networkInterfaces } from 'os';
 import * as dgram from 'dgram';
 import { randomUUID } from 'crypto';
 import { DiscoveredDevice } from '../camera-plugin.interface';
@@ -37,28 +38,30 @@ export class OnvifDiscoveryService {
     senderAddress?: string,
   ): DiscoveredDevice | null {
     try {
+      if (!/<(?:[\w.-]+:)?ProbeMatch\b/.test(xml)) return null;
+      xml = xml.match(/<(?:[\w.-]+:)?ProbeMatch\b[^>]*>[\s\S]*?<\/(?:[\w.-]+:)?ProbeMatch>/)?.[0] || xml;
       // Extract XAddrs (service URL)
       const xaddrsMatch = xml.match(
-        /<[^:]*:?XAddrs[^>]*>([^<]+)<\/[^:]*:?XAddrs>/i,
+        /<(?:[\w.-]+:)?XAddrs[^>]*>([^<]+)<\/(?:[\w.-]+:)?XAddrs>/i,
       );
       const xaddrs = xaddrsMatch ? xaddrsMatch[1].trim() : '';
 
       // Extract Endpoint Reference / Address
       const epMatch = xml.match(
-        /<[^:]*:?Address[^>]*>([^<]+)<\/[^:]*:?Address>/i,
+        /<(?:[\w.-]+:)?Address[^>]*>([^<]+)<\/(?:[\w.-]+:)?Address>/i,
       );
       const epRef = epMatch ? epMatch[1].trim() : '';
 
       // Extract Scopes
       const scopesMatch = xml.match(
-        /<[^:]*:?Scopes[^>]*>([^<]+)<\/[^:]*:?Scopes>/i,
+        /<(?:[\w.-]+:)?Scopes[^>]*>([^<]+)<\/(?:[\w.-]+:)?Scopes>/i,
       );
       const scopesStr = scopesMatch ? scopesMatch[1].trim() : '';
       const scopes = scopesStr ? scopesStr.split(/\s+/) : [];
 
       // Extract Types
       const typesMatch = xml.match(
-        /<[^:]*:?Types[^>]*>([^<]+)<\/[^:]*:?Types>/i,
+        /<(?:[\w.-]+:)?Types[^>]*>([^<]+)<\/(?:[\w.-]+:)?Types>/i,
       );
       const types = typesMatch ? typesMatch[1].trim() : '';
 
@@ -68,14 +71,18 @@ export class OnvifDiscoveryService {
 
       // First URL in XAddrs (space-separated if multiple)
       const primaryUrl =
-        xaddrs.split(/\s+/)[0] ||
+        xaddrs.split(/\s+/).find((value) => {
+          try { return ['http:', 'https:'].includes(new URL(value).protocol); }
+          catch { return false; }
+        }) ||
         (senderAddress ? `http://${senderAddress}/onvif/device_service` : '');
 
       // Parse human-readable name from scopes (e.g. onvif://www.onvif.org/name/Living_Room or onvif://www.onvif.org/hardware/ModelX)
       let name = '';
       let hardware = '';
       for (const scope of scopes) {
-        const decoded = decodeURIComponent(scope);
+        let decoded = scope;
+        try { decoded = decodeURIComponent(scope); } catch {}
         if (decoded.includes('/name/')) {
           name = decoded.split('/name/').pop() || '';
         } else if (decoded.includes('/hardware/')) {
@@ -96,7 +103,7 @@ export class OnvifDiscoveryService {
 
       const deviceId =
         epRef ||
-        `onvif-${senderAddress || 'unknown'}-${randomUUID().substring(0, 8)}`;
+        `onvif-${primaryUrl}`;
 
       return {
         id: deviceId,
@@ -121,100 +128,65 @@ export class OnvifDiscoveryService {
   /**
    * Broadcasts WS-Discovery Probe to 239.255.255.250:3702 and gathers responses
    */
-  async discover(timeoutMs = 2500): Promise<DiscoveredDevice[]> {
-    const devices: Map<string, DiscoveredDevice> = new Map();
-    const probe = this.createProbeMessage();
+  async discover(timeoutMs = 5000, transport?: { address: string; target: string; port: number }): Promise<DiscoveredDevice[]> {
+    const devices = new Map<string, DiscoveredDevice>();
+    const addresses = transport ? [transport.address] : [...new Set(Object.values(networkInterfaces()).flat()
+      .filter((entry) => entry && entry.family === 'IPv4' && !entry.internal)
+      .map((entry) => entry!.address))];
+    if (!addresses.length) throw new ServiceUnavailableException('No active IPv4 network interface. Connect the backend computer to the camera network.');
 
-    return new Promise<DiscoveredDevice[]>((resolve) => {
-      let socket: dgram.Socket | null = null;
-      let timeoutHandle: NodeJS.Timeout | null = null;
-
-      const cleanup = () => {
-        if (timeoutHandle) {
-          clearTimeout(timeoutHandle);
-          timeoutHandle = null;
+    return new Promise((resolve, reject) => {
+      const sockets: dgram.Socket[] = [];
+      const retries: NodeJS.Timeout[] = [];
+      let sent = false;
+      let networkError = '';
+      let finished = false;
+      setTimeout(() => {
+        finished = true;
+        retries.forEach(clearTimeout);
+        for (const socket of sockets) { try { socket.close(); } catch {} }
+        if (!sent) reject(new ServiceUnavailableException(`ONVIF multicast discovery is unavailable${networkError ? ` (${networkError})` : ''}. Check local network permissions and multicast routing, or add the camera by its ONVIF address.`));
+        else resolve([...devices.values()]);
+      }, timeoutMs);
+      for (const address of addresses) {
+        try {
+          const socket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
+          sockets.push(socket);
+          socket.on('error', (err) => this.logger.warn(`ONVIF discovery on ${address}: ${err.message}`));
+          socket.on('message', (message, remote) => {
+            if (finished) return;
+            const matches = message.toString('utf8').match(/<(?:[\w.-]+:)?ProbeMatch\b[^>]*>[\s\S]*?<\/(?:[\w.-]+:)?ProbeMatch>/g) || [];
+            for (const xml of matches) {
+              const device = this.parseProbeMatch(xml, remote.address);
+              if (device) devices.set(device.id, device);
+            }
+          });
+          socket.bind(0, address, () => {
+            if (finished) return;
+            try {
+              socket.setMulticastInterface(address);
+              socket.setMulticastTTL(2);
+              socket.setMulticastLoopback(false);
+              const probe = Buffer.from(this.createProbeMessage());
+              const send = () => {
+                if (finished) return;
+                socket.send(probe, transport?.port || 3702, transport?.target || '239.255.255.250', (err) => {
+                  if (!err) sent = true;
+                  else {
+                    networkError = (err as NodeJS.ErrnoException).code || 'network error';
+                    this.logger.warn(`ONVIF probe send failed on ${address}: ${err.message}`);
+                  }
+                });
+              };
+              send();
+              retries.push(setTimeout(send, Math.min(1000, timeoutMs / 2)));
+            } catch (err) {
+              this.logger.warn(`ONVIF multicast unavailable on ${address}: ${(err as Error).message}`);
+            }
+          });
+        } catch (err) {
+          this.logger.warn(`ONVIF discovery unavailable on ${address}: ${(err as Error).message}`);
         }
-        if (socket) {
-          try {
-            socket.close();
-          } catch {
-            // Socket already closed
-          }
-          socket = null;
-        }
-      };
-
-      try {
-        socket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
-
-        socket.on('error', (err) => {
-          this.logger.warn(`ONVIF WS-Discovery socket error: ${err.message}`);
-          cleanup();
-          resolve(Array.from(devices.values()));
-        });
-
-        socket.on('message', (msg, rinfo) => {
-          const xml = msg.toString('utf8');
-          const device = this.parseProbeMatch(xml, rinfo.address);
-          if (device) {
-            this.logger.log(
-              `Discovered ONVIF device: ${device.name} at ${device.address}`,
-            );
-            devices.set(device.address || device.id, device);
-          }
-        });
-
-        socket.bind(0, () => {
-          if (!socket) return;
-          try {
-            socket.setBroadcast(true);
-            socket.setMulticastTTL(2);
-            socket.setMulticastLoopback(true);
-
-            const buf = Buffer.from(probe, 'utf8');
-            socket.send(buf, 0, buf.length, 3702, '239.255.255.250', (err) => {
-              if (err) {
-                this.logger.warn(
-                  `Failed to broadcast WS-Discovery probe: ${err.message}`,
-                );
-              }
-            });
-          } catch (err) {
-            this.logger.warn(
-              `Could not configure multicast broadcast: ${(err as Error).message}`,
-            );
-          }
-        });
-
-        timeoutHandle = setTimeout(() => {
-          cleanup();
-
-          const result = Array.from(devices.values());
-          // If no devices found and mock discovery is requested or in development test mode
-          if (
-            result.length === 0 &&
-            process.env.MOCK_ONVIF_DISCOVERY === 'true'
-          ) {
-            result.push({
-              id: 'onvif-simulated-01',
-              name: 'Simulated Office Cam (ONVIF)',
-              address: 'http://192.168.1.150:80/onvif/device_service',
-              metadata: {
-                hardware: 'CamBridge-Virtual-ONVIF-1080p',
-                types: 'dn:NetworkVideoTransmitter',
-                scopes: ['onvif://www.onvif.org/name/Office_Cam'],
-                rtspUrl: 'rtsp://192.168.1.150:554/live/ch0',
-              },
-            });
-          }
-          resolve(result);
-        }, timeoutMs);
-      } catch (err) {
-        this.logger.warn(
-          `Error initializing ONVIF discovery: ${(err as Error).message}`,
-        );
-        cleanup();
-        resolve(Array.from(devices.values()));
       }
     });
   }

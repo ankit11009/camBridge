@@ -238,6 +238,26 @@ describe('CamerasService', () => {
   });
 
   describe('connect', () => {
+    it('serializes rapid statuses and does not overwrite ERROR with a stale connect result', async () => {
+      prisma.camera.findFirst.mockResolvedValue({ id: 'cam-1', ownerId: 'user-1', pluginType: PluginType.RTSP, connectionConfig: {} });
+      let finishConnected!: () => void;
+      prisma.camera.update.mockImplementation(({ data }: any) => data.status === 'CONNECTED'
+        ? new Promise(resolve => { finishConnected = () => resolve({}); }) : Promise.resolve({}));
+      pluginManager.connect.mockImplementation(async (_id: any, _type: any, _config: any, status: any) => {
+        status('CONNECTING');
+        status('CONNECTED');
+        status('ERROR');
+        return 'CONNECTED';
+      });
+      const pending = service.connect('user-1', 'cam-1');
+      for (let i = 0; i < 20 && !finishConnected; i++) await Promise.resolve();
+      expect(eventsService.emitCameraStatus.mock.calls.map((call: any[]) => call[1])).toEqual(['CONNECTING']);
+      finishConnected();
+      const result = await pending;
+      expect(result.status).toBe('ERROR');
+      expect(eventsService.emitCameraStatus.mock.calls.map((call: any[]) => call[1])).toEqual(['CONNECTING', 'CONNECTED', 'ERROR']);
+    });
+
     it('should delegate to pluginManager and emit status', async () => {
       const mockCam = {
         id: 'cam-1',
@@ -270,6 +290,14 @@ describe('CamerasService', () => {
         expect.any(Date),
       );
       expect(res.status).toBe('CONNECTED');
+      const onStatusChange = pluginManager.connect.mock.calls[0][3];
+      await onStatusChange('ERROR');
+      await onStatusChange('DISCONNECTED');
+      expect(reconnectionService.scheduleReconnection).not.toHaveBeenCalled();
+      expect(eventsService.emitCameraStatus).toHaveBeenCalledWith(
+        'cam-1', 'ERROR', expect.any(Date),
+      );
+
     });
   });
 

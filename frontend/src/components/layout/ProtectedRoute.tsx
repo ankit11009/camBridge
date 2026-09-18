@@ -10,13 +10,13 @@ export function ProtectedRoute() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
+    <div className="min-h-screen bg-[#F8F4EB] text-[#253D2C] flex flex-col">
       <Navbar />
-      <main className="flex-1 max-w-6xl mx-auto w-full p-6">
+      <main className="flex-1 max-w-[1680px] mx-auto w-full p-6">
         <Outlet />
       </main>
-      <footer className="border-t border-slate-900 py-4 px-6 text-center text-xs text-slate-500">
-        CamBridge Platform &bull; Phase 2: Auth & Camera CRUD
+      <footer className="border-t border-[#DCE3D9] py-4 px-6 text-center text-xs text-[#617166]">
+        CamBridge · A clearer view of your space
       </footer>
     </div>
   );

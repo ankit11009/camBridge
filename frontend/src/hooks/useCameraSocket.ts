@@ -7,7 +7,7 @@ import { useNotificationStore } from '../store/notificationStore';
 const WS_URL =
   import.meta.env.VITE_WS_URL ||
   import.meta.env.VITE_API_BASE_URL ||
-  'http://localhost:3000';
+  window.location.origin;
 
 export interface CameraStatusPayload {
   cameraId: string;
@@ -21,20 +21,25 @@ export function useCameraSocket(activeCameraId?: string) {
 
   const updateCache = useCallback(
     (data: CameraStatusPayload) => {
-      // Check status transition for notifications
-      if (data.status === 'DISCONNECTED') {
+      const cached = queryClient.getQueryData<Camera>(['camera', data.cameraId]) ||
+        queryClient.getQueryData<Camera[]>(['cameras'])?.find(c => c.id === data.cameraId);
+      if (cached?.lastSeenAt && data.lastSeenAt &&
+        Date.parse(data.lastSeenAt) < Date.parse(cached.lastSeenAt)) return;
+      const changed = cached?.status !== data.status;
+      // Notify once per status transition.
+      if (changed && data.status === 'DISCONNECTED') {
         useNotificationStore.getState().addNotification({
           type: 'warning',
           title: 'Camera Disconnected',
           message: `Camera ${data.cameraId.slice(0, 8)} has been disconnected.`,
         });
-      } else if (data.status === 'ERROR') {
+      } else if (changed && data.status === 'ERROR') {
         useNotificationStore.getState().addNotification({
           type: 'error',
           title: 'Camera Connection Error',
-          message: `Camera ${data.cameraId.slice(0, 8)} encountered a connection fault.`,
+          message: `Camera ${data.cameraId.slice(0, 8)} failed to connect or stopped receiving video. The attempt has stopped; check the camera and retry.`,
         });
-      } else if (data.status === 'CONNECTED') {
+      } else if (changed && data.status === 'CONNECTED') {
         useNotificationStore.getState().addNotification({
           type: 'success',
           title: 'Camera Connected',
@@ -71,16 +76,25 @@ export function useCameraSocket(activeCameraId?: string) {
 
   useEffect(() => {
     const socket = io(WS_URL, {
-      transports: ['websocket', 'polling'],
-      autoConnect: true,
+      transports: ['polling', 'websocket'],
+      autoConnect: false,
+      timeout: 10000,
     });
     socketRef.current = socket;
+    const connectTimer = setTimeout(() => socket.connect(), 0);
+    let connectionErrorShown = false;
+    socket.on('connect', () => { connectionErrorShown = false; });
+    socket.on('connect_error', () => {
+      if (connectionErrorShown) return;
+      connectionErrorShown = true;
+      useNotificationStore.getState().addNotification({ type: 'warning', title: 'Live updates unavailable', message: 'Cannot reach the live update service. Check that the backend is running.' });
+    });
 
     socket.on('camera:status', (data: CameraStatusPayload) => {
       updateCache(data);
     });
 
-    socket.on('camera:event', (data: { cameraId: string; type?: string }) => {
+    socket.on('camera:event', (data: { cameraId: string; type?: string; payload?: { cameraName?: string; eventType?: string; personCount?: number } }) => {
       if (data?.cameraId) {
         queryClient.invalidateQueries({
           queryKey: ['camera-events', data.cameraId],
@@ -88,11 +102,19 @@ export function useCameraSocket(activeCameraId?: string) {
         queryClient.invalidateQueries({
           queryKey: ['camera-recordings', data.cameraId],
         });
+        if (data.type === 'DETECTION' && data.payload?.eventType?.startsWith('PERSON_')) {
+          const exited = data.payload.eventType === 'PERSON_EXITED';
+          useNotificationStore.getState().addNotification({
+            type: exited ? 'info' : 'warning',
+            title: exited ? 'Zone cleared' : 'Person detected',
+            message: `${data.payload.cameraName || data.cameraId.slice(0, 8)}: ${exited ? 'No people remain in the selected zone.' : `${data.payload.personCount || 1} person(s) in the selected zone.`}`,
+          });
+        }
         if (data.type === 'MOTION') {
           useNotificationStore.getState().addNotification({
             type: 'info',
             title: 'Motion Detected',
-            message: `Motion event captured for camera ${data.cameraId.slice(0, 8)}. Automatic clip recording triggered.`,
+            message: `Movement detected in the selected zone of ${data.payload?.cameraName || data.cameraId.slice(0, 8)}.`,
           });
         }
       }
@@ -103,6 +125,7 @@ export function useCameraSocket(activeCameraId?: string) {
     }
 
     return () => {
+      clearTimeout(connectTimer);
       if (activeCameraId) {
         socket.emit('unsubscribe:camera', { cameraId: activeCameraId });
       }

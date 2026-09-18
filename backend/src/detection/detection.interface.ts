@@ -1,5 +1,10 @@
 export type DetectedObjectLabel =
-  'person' | 'vehicle' | 'animal' | 'package' | 'object';
+  | 'person'
+  | 'vehicle'
+  | 'animal'
+  | 'package'
+  | 'object'
+  | 'motion';
 
 export interface BoundingBox {
   x: number;
@@ -16,7 +21,7 @@ export interface DetectionResult {
 }
 
 export interface DetectionEventPayload {
-  source: 'live_frame' | 'recording_clip';
+  source: 'live_frame' | 'recording_clip' | 'automated_monitor';
   sourceId: string;
   detections: DetectionResult[];
   primaryDetection?: DetectionResult;

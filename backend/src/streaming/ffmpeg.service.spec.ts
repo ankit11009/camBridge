@@ -82,4 +82,43 @@ describe('FfmpegService', () => {
 
     mockProcess.emit('error', new Error('FFmpeg crash'));
   });
+  it('reports clean source EOF once and ignores exits from replaced streams', () => {
+    const makeProcess = () => Object.assign(new EventEmitter(), {
+      pid: 123, killed: false, kill: jest.fn(), stderr: new EventEmitter(),
+    });
+    const oldProcess = makeProcess();
+    const newProcess = makeProcess();
+    jest.spyOn(child_process, 'spawn')
+      .mockReturnValueOnce(oldProcess as any)
+      .mockReturnValueOnce(newProcess as any);
+    const onError = jest.fn();
+    service.startStream('cam-1', 'rtsp://localhost/live', '/tmp/streams/cam-1', onError);
+    service.startStream('cam-1', 'rtsp://localhost/live', '/tmp/streams/cam-1', onError);
+    oldProcess.emit('exit', 1, null);
+    expect(service.isStreaming('cam-1')).toBe(true);
+    expect(onError).not.toHaveBeenCalled();
+    newProcess.emit('exit', 0, null);
+    newProcess.emit('error', new Error('late error'));
+    expect(service.isStreaming('cam-1')).toBe(false);
+    expect(onError).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops a stalled stream after 15 seconds and reports one error', async () => {
+    jest.useFakeTimers();
+    const process = Object.assign(new EventEmitter(), {
+      pid: 12, killed: false, kill: jest.fn(), stderr: new EventEmitter(),
+    });
+    jest.spyOn(child_process, 'spawn').mockReturnValue(process as any);
+    const onError = jest.fn();
+    service.startStream('timeout-test', 'rtsp://camera/live', '/tmp/streams/timeout-test', onError);
+    await jest.advanceTimersByTimeAsync(15000);
+    expect(process.kill).toHaveBeenCalledWith('SIGTERM');
+    expect(service.isStreaming('timeout-test')).toBe(false);
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('timed out') }));
+    process.emit('exit', 1, null);
+    expect(onError).toHaveBeenCalledTimes(1);
+    jest.clearAllTimers();
+    jest.useRealTimers();
+  });
+
 });

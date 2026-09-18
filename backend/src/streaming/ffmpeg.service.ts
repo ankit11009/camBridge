@@ -10,6 +10,7 @@ export interface StreamProcessInfo {
   playlistPath: string;
   startedAt: Date;
   rtspUrl: string;
+  startupTimer?: NodeJS.Timeout;
 }
 
 @Injectable()
@@ -52,28 +53,52 @@ export class FfmpegService implements OnModuleDestroy {
       } catch {}
     }
 
+    // When running inside Docker, resolve localhost / 127.0.0.1 to host.docker.internal
+    // so FFmpeg inside the container can reach RTSP services (like MediaMTX) on the host.
+    let resolvedRtspUrl = rtspUrl;
+    if (fs.existsSync('/.dockerenv') || process.env.IS_DOCKER === 'true') {
+      resolvedRtspUrl = resolvedRtspUrl.replace(
+        /:\/\/(localhost|127\.0\.0\.1)(:|\/)/,
+        '://host.docker.internal$2',
+      );
+    }
+
     const args = [
-      '-fflags',
-      'nobuffer',
+      '-analyzeduration',
+      '500000',
+      '-probesize',
+      '262144',
       '-rtsp_transport',
       'tcp',
+      '-timeout',
+      '10000000', // Stop when the RTSP source stops responding for 10 seconds
       '-i',
-      rtspUrl,
+      resolvedRtspUrl,
       '-c:v',
       'libx264',
       '-preset',
       'veryfast',
       '-tune',
       'zerolatency',
+      // HLS cuts at keyframes: force one every second instead of waiting
+      // for libx264's default GOP (up to 250 frames).
+      '-force_key_frames',
+      'expr:gte(t,n_forced*1)',
+      '-sc_threshold',
+      '0',
+      '-pix_fmt',
+      'yuv420p',
       '-an', // disable audio for camera streaming stability
       '-f',
       'hls',
       '-hls_time',
-      '2',
+      '1',
       '-hls_list_size',
       '6',
       '-hls_flags',
-      'delete_segments',
+      'delete_segments+independent_segments+temp_file',
+      '-hls_start_number_source',
+      'epoch',
       playlistPath,
     ];
 
@@ -106,6 +131,18 @@ export class FfmpegService implements OnModuleDestroy {
 
     this.activeStreams.set(cameraId, processInfo);
 
+    processInfo.startupTimer = setInterval(() => {
+      if (this.activeStreams.get(cameraId) !== processInfo || fs.existsSync(playlistPath)) {
+        clearInterval(processInfo.startupTimer);
+        return;
+      }
+      if (Date.now() - processInfo.startedAt.getTime() >= 15000) {
+        this.stopStream(cameraId);
+        onError?.(new Error('Camera connection timed out: no video received within 15 seconds.'));
+      }
+    }, 250);
+    processInfo.startupTimer.unref();
+
     let errorBuffer = '';
     ffmpegProcess.stderr?.on('data', (data) => {
       const chunk = data.toString();
@@ -116,30 +153,28 @@ export class FfmpegService implements OnModuleDestroy {
       }
     });
 
-    const intentionallyStopped = false;
+    // Ignore callbacks from a stopped or replaced process, and report failure once.
+    const reportFailure = (error: Error) => {
+      if (this.activeStreams.get(cameraId) !== processInfo) return;
+      clearInterval(processInfo.startupTimer);
+      this.activeStreams.delete(cameraId);
+      onError?.(error);
+    };
     ffmpegProcess.on('error', (err) => {
       this.logger.error(
         `FFmpeg process error for camera ${cameraId} (PID: ${pid}): ${err.message}`,
       );
-      this.activeStreams.delete(cameraId);
-      if (!intentionallyStopped && onError) {
-        onError(err);
-      }
+      reportFailure(err);
     });
 
     ffmpegProcess.on('exit', (code, signal) => {
       this.logger.log(
         `FFmpeg process for camera ${cameraId} (PID: ${pid}) exited with code ${code}, signal ${signal}`,
       );
-      this.activeStreams.delete(cameraId);
-
-      if (!intentionallyStopped && code !== 0 && code !== null) {
-        const errorMsg = `FFmpeg exited with error code ${code}: ${errorBuffer.slice(-300).trim()}`;
-        this.logger.error(`Stream error for camera ${cameraId}: ${errorMsg}`);
-        if (onError) {
-          onError(new Error(errorMsg));
-        }
-      }
+      // Even a clean EOF means the live source has stopped.
+      reportFailure(new Error(
+        `FFmpeg stream ended (code ${code}, signal ${signal}): ${errorBuffer.slice(-300).trim()}`,
+      ));
     });
 
     return processInfo;
@@ -158,6 +193,7 @@ export class FfmpegService implements OnModuleDestroy {
       `Terminating FFmpeg stream for camera ${cameraId} (PID: ${processInfo.pid})...`,
     );
     this.activeStreams.delete(cameraId);
+    clearInterval(processInfo.startupTimer);
 
     try {
       if (processInfo.process && !processInfo.process.killed) {
@@ -166,7 +202,7 @@ export class FfmpegService implements OnModuleDestroy {
         // Force kill after 1 second if still alive
         const forceTimer = setTimeout(() => {
           try {
-            if (!processInfo.process.killed) {
+            if (processInfo.process.exitCode === null && processInfo.process.signalCode === null) {
               processInfo.process.kill('SIGKILL');
             }
           } catch {}

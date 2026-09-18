@@ -1,3 +1,4 @@
+import { ToastNotifications } from './components/ToastNotifications';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { ProtectedRoute } from './components/layout/ProtectedRoute';
 import { LoginPage } from './pages/LoginPage';
@@ -9,6 +10,7 @@ import { HealthCheckPage } from './pages/HealthCheckPage';
 export default function App() {
   return (
     <BrowserRouter>
+      <ToastNotifications />
       <Routes>
         {/* Public Routes */}
         <Route path="/login" element={<LoginPage />} />

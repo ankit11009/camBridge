@@ -110,12 +110,12 @@ docker compose up --build
 This boots 4 containers:
 1. **PostgreSQL 16**: Port `5432`
 2. **Redis 7**: Port `6379`
-3. **NestJS Backend**: Port `3000` (auto-runs database migrations before listening)
+3. **NestJS Backend**: Port `5004` (auto-runs database migrations before listening)
 4. **Vite React Frontend**: Port `5173`
 
 ### 4. Open the App
 - **Dashboard**: [http://localhost:5173](http://localhost:5173)
-- **Backend Health Check**: [http://localhost:3000/health](http://localhost:3000/health)
+- **Backend Health Check**: [http://localhost:5004/health](http://localhost:5004/health)
 
 ---
 
@@ -176,10 +176,10 @@ npm run build          # Compiles production SPA bundle via Vite
    - Manual start/stop controls producing standard browser-playable MP4 clips served via HTTP 206 Partial Content byte ranges for responsive scrubbing.
    - Automated motion-triggered recording window (15s) upon motion event capture.
    - Automated storage retention policy purging clips older than $N$ days.
-4. **Lightweight AI Detection Pipeline**:
-   - Extracts live frame grabs or scans recorded MP4 clips.
-   - Identifies persons, vehicles, and objects with confidence ratings and bounding box geometry.
-   - Stores typed `DETECTION` events and broadcasts real-time alerts to connected web clients.
+4. **YOLO Person and Zone Detection**:
+   - Start/stop monitoring and select a rectangular zone from the camera image.
+   - Detects people with YOLO and processes zone occupancy events.
+   - Stores `DETECTION` events and sends dashboard notifications.
 5. **Real-time Event Audit Log**:
    - Interactive activity timeline with filter chips (`All`, `Status`, `Motion`, `Detection`) and instant text search.
 
@@ -259,3 +259,53 @@ Per §13 of the project build specification, Redis was evaluated for event pub/s
 
 ## License
 MIT License. Built as a portfolio capstone demonstration of modular distributed video surveillance architectures.
+
+### Local development: API, detection and ONVIF
+
+Run `npm run start:dev` in `backend` and `npm run dev` in `frontend`.
+The frontend now proxies API requests, HLS and Socket.IO to `127.0.0.1:5004`,
+so login/signup work on the frontend's origin, including LAN access.
+Leave `VITE_API_BASE_URL` and `VITE_WS_URL` unset for this setup. If the backend
+uses another port, start Vite with `BACKEND_URL=http://127.0.0.1:YOUR_PORT npm run dev`.
+Restart Vite after changing its configuration. Explicit cross-origin API overrides
+still require the frontend origin in the backend's `CORS_ORIGIN` allowlist.
+
+For actual image detection, install FFmpeg and initialize Python from `backend`:
+
+```sh
+python3 -m venv .venv
+.venv/bin/python -m pip install -r scripts/requirements.txt
+```
+
+The backend automatically uses `.venv/bin/python`; `DETECTION_PYTHON` can override
+it. Install the dependencies above, then download the YOLO11n weights once:
+
+```sh
+.venv/bin/python scripts/setup_detector.py
+```
+
+The detector uses [Ultralytics YOLO11](https://docs.ultralytics.com/models/yolo11/)
+with COCO person class 0 and a default confidence threshold of 0.5. Set
+`DETECTION_MODEL` to an absolute path to compatible detection weights,
+`DETECTION_CONFIDENCE` to adjust the threshold, and `DETECTION_DEVICE` to select
+`cpu` (default) or an available accelerator. Runtime inference requires local weights.
+
+In **Person detection (YOLO)**, capture a frame, drag a rectangular zone, then
+click **Start Detection**. A person's bounding-box bottom-center must lie inside
+the zone. Entry generates `PERSON_ENTERED`; occupied zones generate
+`PERSON_PRESENT` reminders every ten seconds; two consecutive empty samples
+generate `PERSON_EXITED`. Events describe zone occupancy, not individual identities
+or tracked people. Stop suppresses pending results. Monitoring requests a sample
+every two seconds, skipping ticks while inference is busy. Model loading and CPU
+speed affect the actual sampling rate. Settings reset on backend restart.
+Manual live/recording analysis checks one frame for people in the selected zone;
+it does not scan an entire recording. Python, dependencies and model weights must
+also be provisioned in container deployments (the existing Alpine image does not
+include the PyTorch runtime).
+
+ONVIF discovery requires cameras reachable on the backend's local network with
+UDP multicast port 3702 available. Enable ONVIF on the camera, enter its ONVIF
+username/password in Network Discovery before adding it, and connect the camera.
+CamBridge negotiates the Media service, profile and RTSP URI with WS-Security
+credentials rather than guessing a vendor-specific path. Camera and server clocks
+must agree for digest authentication. Explicit RTSP URLs remain supported.

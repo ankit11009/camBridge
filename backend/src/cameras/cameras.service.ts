@@ -146,63 +146,43 @@ export class CamerasService {
     this.manualDisconnects.delete(id);
     this.reconnectionService.cancelReconnection(id);
 
-    // Callback invoked when plugin status transitions (e.g. CONNECTING -> CONNECTED / ERROR)
-    const onStatusChange = async (newStatus: CameraStatusValue) => {
-      const timestamp = new Date();
-      try {
-        await this.prisma.camera.update({
-          where: { id },
-          data: {
-            status: newStatus as CameraStatus,
-            lastSeenAt: timestamp,
-          },
-        });
-      } catch (err) {
-        this.logger.warn(
-          `Failed to persist status transition for camera ${id}: ${(err as Error).message}`,
-        );
-      }
-      if (this.manualDisconnects.has(id)) {
-        // Manual intentional disconnect: do NOT schedule reconnection
+    // Plugins can report several states without awaiting persistence. Serialize
+    // writes and broadcasts so CONNECTING cannot arrive after ERROR.
+    let statusQueue = Promise.resolve();
+    let latestStatus: CameraStatusValue | undefined;
+    let updatedTime = now;
+    const onStatusChange = (newStatus: CameraStatusValue) => {
+      if (newStatus === latestStatus) return statusQueue;
+      latestStatus = newStatus;
+      const timestamp = new Date(Math.max(Date.now(), updatedTime.getTime() + 1));
+      updatedTime = timestamp;
+      statusQueue = statusQueue.then(async () => {
+        try {
+          await this.prisma.camera.update({
+            where: { id },
+            data: { status: newStatus as CameraStatus, lastSeenAt: timestamp },
+          });
+        } catch (err) {
+          this.logger.warn(`Failed to persist camera status: ${(err as Error).message}`);
+        }
         this.reconnectionService.cancelReconnection(id);
-      } else if (newStatus === 'DISCONNECTED' || newStatus === 'ERROR') {
-        this.reconnectionService.scheduleReconnection(camera.ownerId, id, () =>
-          this.connect(camera.ownerId, id),
-        );
-      } else if (newStatus === 'CONNECTED') {
-        this.reconnectionService.cancelReconnection(id);
-      }
-
-      this.eventsService.emitCameraStatus(id, newStatus, timestamp);
+        this.eventsService.emitCameraStatus(id, newStatus, timestamp);
+      });
+      return statusQueue;
     };
-
-    // Broadcast immediate CONNECTING state
-    this.eventsService.emitCameraStatus(id, 'CONNECTING', now);
-    await this.prisma.camera.update({
-      where: { id },
-      data: {
-        status: CameraStatus.CONNECTING,
-        lastSeenAt: now,
-      },
-    });
-
-    // Delegate connect to PluginManager
-    const finalStatus = await this.pluginManager.connect(
-      id,
-      camera.pluginType,
-      camera.connectionConfig,
-      onStatusChange,
-    );
-
-    const updatedTime = new Date();
-    await this.prisma.camera.update({
-      where: { id },
-      data: {
-        status: finalStatus as CameraStatus,
-        lastSeenAt: updatedTime,
-      },
-    });
-    this.eventsService.emitCameraStatus(id, finalStatus, updatedTime);
+    await onStatusChange('CONNECTING');
+    try {
+      const result = await this.pluginManager.connect(
+        id, camera.pluginType, camera.connectionConfig, onStatusChange,
+      );
+      // Use the latest callback state if the stream failed during connect.
+      await onStatusChange(latestStatus === 'CONNECTING' ? result : latestStatus!);
+      await statusQueue;
+    } catch (err) {
+      await onStatusChange('ERROR');
+      throw err;
+    }
+    const finalStatus = latestStatus!;
 
     const streamSource = await this.pluginManager.getStreamSource(id);
 

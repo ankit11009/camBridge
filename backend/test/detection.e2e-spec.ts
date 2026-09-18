@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import * as request from 'supertest';
+import { DetectionService } from '../src/detection/detection.service';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { PluginType, CameraStatus, RecordingTrigger } from '@prisma/client';
@@ -159,6 +160,16 @@ describe('AI Detection Subsystem (e2e)', () => {
         transform: true,
       }),
     );
+    // Route/persistence tests use controlled inference; real image analysis is tested separately.
+    jest
+      .spyOn(app.get(DetectionService), 'runDetectionInference')
+      .mockResolvedValue([
+        {
+          label: 'person',
+          confidence: 0.9,
+          box: { x: 10, y: 20, width: 100, height: 200 },
+        },
+      ]);
     await app.init();
   });
 

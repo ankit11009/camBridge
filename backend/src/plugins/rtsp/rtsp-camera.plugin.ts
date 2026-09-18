@@ -1,4 +1,5 @@
 import { Logger } from '@nestjs/common';
+import * as fs from 'fs';
 import {
   CameraPlugin,
   CameraStatusValue,
@@ -48,6 +49,15 @@ export class RtspCameraPlugin implements CameraPlugin {
       const encodedUser = encodeURIComponent(String(config.username));
       const encodedPass = encodeURIComponent(String(config.password));
       targetUrl = `rtsp://${encodedUser}:${encodedPass}@${urlWithoutScheme}`;
+    }
+
+    // When running inside Docker, resolve localhost / 127.0.0.1 to host.docker.internal
+    // so FFmpeg inside the container can reach RTSP services (like MediaMTX) on the host.
+    if (fs.existsSync('/.dockerenv') || process.env.IS_DOCKER === 'true') {
+      targetUrl = targetUrl.replace(
+        /:\/\/(localhost|127\.0\.0\.1)(:|\/)/,
+        '://host.docker.internal$2',
+      );
     }
 
     try {

@@ -1,5 +1,6 @@
+import Hls from 'hls.js';
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 import { LiveVideoPlayer } from './LiveVideoPlayer';
 
 // Mock hls.js
@@ -72,9 +73,26 @@ describe('LiveVideoPlayer Component', () => {
     render(<LiveVideoPlayer {...defaultProps} cameraStatus="CONNECTED" />);
 
     expect(screen.getByText('LIVE')).toBeDefined();
-    expect(screen.getByText('HLS 1080p')).toBeDefined();
+    expect(screen.getByText('Live feed')).toBeDefined();
     expect(screen.getByTitle('Play')).toBeDefined();
     expect(screen.getByTitle('Unmute')).toBeDefined();
     expect(screen.getByTitle('Fullscreen')).toBeDefined();
   });
+  it('stops fatal playback failures until an explicit retry', () => {
+    vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
+    const onRetry = vi.fn();
+    render(<LiveVideoPlayer {...defaultProps} cameraStatus="CONNECTED" onRetry={onRetry} />);
+    const player = vi.mocked(Hls).mock.results[vi.mocked(Hls).mock.results.length - 1].value;
+    const errorHandler = player.on.mock.calls.find((call: any[]) => call[0] === Hls.Events.ERROR)[1];
+    act(() => errorHandler(Hls.Events.ERROR, { fatal: true, type: Hls.ErrorTypes.NETWORK_ERROR }));
+    expect(player.destroy).toHaveBeenCalledTimes(1);
+    expect(player.startLoad).not.toHaveBeenCalled();
+    expect(player.recoverMediaError).not.toHaveBeenCalled();
+    expect(screen.getByTestId('player-error-state')).toBeDefined();
+    expect(screen.queryByTestId('player-buffering-state')).toBeNull();
+    fireEvent.click(screen.getByText('Retry Connection'));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(Hls).mock.results[vi.mocked(Hls).mock.results.length - 1].value).toBe(player);
+  });
+
 });

@@ -4,10 +4,12 @@ import { ConfigService } from '@nestjs/config';
 import { AppModule } from './app.module';
 import { RedactionLoggingInterceptor } from './common/interceptors/redaction-logging.interceptor';
 import helmet from 'helmet';
+import { corsOptions } from './common/cors.config';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
   const app = await NestFactory.create(AppModule);
+  app.enableShutdownHooks();
 
   // Security: HTTP headers protection via Helmet
   app.use(
@@ -18,18 +20,8 @@ async function bootstrap() {
   );
 
   const configService = app.get(ConfigService);
-  const port = configService.get<number>('PORT', 3000);
-  const corsOrigin = configService.get<string>(
-    'CORS_ORIGIN',
-    'http://localhost:5173',
-  );
-
-  app.enableCors({
-    origin: corsOrigin.includes(',')
-      ? corsOrigin.split(',').map((o) => o.trim())
-      : corsOrigin,
-    credentials: true,
-  });
+  const port = configService.get<number>('PORT', 5004);
+  app.enableCors(corsOptions);
 
   app.useGlobalPipes(
     new ValidationPipe({

@@ -1,3 +1,4 @@
+import { getOnvifStreamUri } from './onvif-client';
 import { Logger } from '@nestjs/common';
 import {
   CameraPlugin,
@@ -10,6 +11,7 @@ import { StreamingService } from '../../streaming/streaming.service';
 export class OnvifCameraPlugin implements CameraPlugin {
   readonly type = 'ONVIF' as const;
   private readonly logger = new Logger(OnvifCameraPlugin.name);
+  private connectionAbort?: AbortController;
   private status: CameraStatusValue = 'UNKNOWN';
   private onStatusChangeCallback?: (status: CameraStatusValue) => void;
 
@@ -32,19 +34,15 @@ export class OnvifCameraPlugin implements CameraPlugin {
    */
   resolveStreamUrl(config: CameraConnectionConfig): string {
     if (config.rtspUrl && typeof config.rtspUrl === 'string') {
-      let url = config.rtspUrl;
-      if (
-        config.username &&
-        config.password &&
-        !url.includes('@') &&
-        url.startsWith('rtsp://')
-      ) {
-        const withoutScheme = url.substring('rtsp://'.length);
-        const encodedUser = encodeURIComponent(String(config.username));
-        const encodedPass = encodeURIComponent(String(config.password));
-        url = `rtsp://${encodedUser}:${encodedPass}@${withoutScheme}`;
+      const url = new URL(config.rtspUrl);
+      if (!['rtsp:', 'rtsps:'].includes(url.protocol)) {
+        throw new Error('ONVIF stream URL must use RTSP');
       }
-      return url;
+      if (config.username && !url.username) {
+        url.username = String(config.username);
+        url.password = String(config.password || '');
+      }
+      return url.toString();
     }
 
     const deviceUrl = (config.deviceUrl ||
@@ -60,7 +58,11 @@ export class OnvifCameraPlugin implements CameraPlugin {
       const parsed = new URL(deviceUrl);
       const host = parsed.hostname;
       const rtspPort = config.rtspPort || 554;
-      const path = (config.streamPath as string) || 'live/ch0';
+      if (!config.streamPath)
+        throw new Error(
+          'An explicit streamPath is required for manual URL resolution',
+        );
+      const path = String(config.streamPath).replace(/^\/+/, '');
 
       if (config.username && config.password) {
         const encodedUser = encodeURIComponent(String(config.username));
@@ -77,15 +79,28 @@ export class OnvifCameraPlugin implements CameraPlugin {
   }
 
   async connect(config: CameraConnectionConfig): Promise<void> {
+    this.connectionAbort?.abort();
+    const controller = new AbortController();
+    this.connectionAbort = controller;
+    const deadline = setTimeout(() => controller.abort(), 15000);
     this.setStatus('CONNECTING');
 
     let streamUrl: string;
     try {
-      streamUrl = this.resolveStreamUrl(config);
+      streamUrl =
+        config.rtspUrl || config.streamPath
+          ? this.resolveStreamUrl(config)
+          : this.resolveStreamUrl({
+              ...config,
+              rtspUrl: await getOnvifStreamUri(config, controller.signal),
+            });
     } catch (err) {
-      this.setStatus('ERROR');
+      if (this.connectionAbort === controller) this.setStatus('ERROR');
       throw err;
+    } finally {
+      clearTimeout(deadline);
     }
+    if (controller.signal.aborted || this.connectionAbort !== controller) return;
 
     try {
       this.logger.log(
@@ -109,6 +124,8 @@ export class OnvifCameraPlugin implements CameraPlugin {
   }
 
   async disconnect(): Promise<void> {
+    this.connectionAbort?.abort();
+    this.connectionAbort = undefined;
     this.streamingService.stopStream(this.cameraId);
     this.setStatus('DISCONNECTED');
   }

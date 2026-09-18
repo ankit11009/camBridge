@@ -57,6 +57,9 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
   // Attach / Detach HLS player
   useEffect(() => {
     if (!isConnected || !videoRef.current) {
+      setPlayerError(null);
+      setIsBuffering(false);
+      setIsPlaying(false);
       if (hlsRef.current) {
         hlsRef.current.destroy();
         hlsRef.current = null;
@@ -73,9 +76,9 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
         enableWorker: true,
         lowLatencyMode: true,
         backBufferLength: 10,
-        maxBufferLength: 10,
-        liveSyncDurationCount: 3,
-        liveMaxLatencyDurationCount: 6,
+        maxBufferLength: 4,
+        liveSyncDurationCount: 2,
+        liveMaxLatencyDurationCount: 4,
       });
       hlsRef.current = hls;
 
@@ -92,24 +95,25 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
 
       hls.on(Hls.Events.ERROR, (_event, data) => {
         if (data.fatal) {
-          switch (data.type) {
-            case Hls.ErrorTypes.NETWORK_ERROR:
-              // Try to recover network error
-              hls.startLoad();
-              break;
-            case Hls.ErrorTypes.MEDIA_ERROR:
-              hls.recoverMediaError();
-              break;
-            default:
-              hls.destroy();
-              setPlayerError('Stream interrupted. Could not load video segments.');
-              break;
-          }
+          hls.destroy();
+          hlsRef.current = null;
+          video.pause();
+          setIsPlaying(false);
+          setIsBuffering(false);
+          setPlayerError('Stream interrupted. Check the camera and retry the connection.');
         }
       });
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
       // Native HLS support (Safari / iOS)
       video.src = streamUrl;
+      const onError = () => {
+        video.removeAttribute('src');
+        video.load();
+        setIsPlaying(false);
+        setIsBuffering(false);
+        setPlayerError('Stream interrupted. Check the camera and retry the connection.');
+      };
+      video.addEventListener('error', onError);
       const onLoaded = () => {
         setIsBuffering(false);
         video.play().catch(() => setIsPlaying(false));
@@ -118,6 +122,9 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
 
       return () => {
         video.removeEventListener('loadedmetadata', onLoaded);
+        video.removeEventListener('error', onError);
+        video.removeAttribute('src');
+        video.load();
       };
     } else {
       setPlayerError('HLS playback is not supported by your browser.');
@@ -171,6 +178,7 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
       <video
         ref={videoRef}
         data-testid="video-element"
+        data-camera-id={cameraId}
         playsInline
         muted={isMuted}
         onPlay={() => setIsPlaying(true)}
@@ -207,13 +215,13 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
           <Loader2 className="w-9 h-9 text-indigo-500 animate-spin mb-3" />
           <h3 className="text-sm font-semibold text-white">Starting Live Stream...</h3>
           <p className="text-xs text-slate-400 mt-1">
-            Transcoding RTSP to HLS chunks via FFmpeg
+            Waiting for your camera to send live video.
           </p>
         </div>
       )}
 
       {/* State: Camera Error or Playback Error */}
-      {(isError || playerError) && (
+      {!isConnecting && (isError || playerError) && (
         <div
           data-testid="player-error-state"
           className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center bg-slate-950/95 z-10"
@@ -227,7 +235,9 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
           </p>
           {onRetry && (
             <button
-              onClick={onRetry}
+              onClick={() => {
+                onRetry?.();
+              }}
               className="mt-4 inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 border border-slate-700 transition-colors"
             >
               <RefreshCw className="w-3.5 h-3.5" />
@@ -257,8 +267,8 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
             <Radio className="w-3 h-3 animate-pulse" />
             LIVE
           </div>
-          <div className="px-2 py-1 rounded-md bg-slate-900/80 border border-slate-700/60 text-slate-300 text-[10px] font-mono backdrop-blur-sm">
-            HLS 1080p
+          <div className="px-2 py-1 rounded-md bg-slate-900/80 border border-slate-700/60 text-slate-300 text-[10px] font-sans backdrop-blur-sm">
+            Live feed
           </div>
         </div>
       )}

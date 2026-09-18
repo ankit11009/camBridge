@@ -16,6 +16,11 @@ describe('Auth & Camera CRUD (e2e)', () => {
     $connect: jest.fn().mockResolvedValue(undefined),
     $disconnect: jest.fn().mockResolvedValue(undefined),
     isDatabaseHealthy: jest.fn().mockResolvedValue(true),
+    $transaction: jest.fn((operations: Promise<unknown>[]) =>
+      Promise.all(operations),
+    ),
+    event: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
+    recording: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
     user: {
       findUnique: jest
         .fn()

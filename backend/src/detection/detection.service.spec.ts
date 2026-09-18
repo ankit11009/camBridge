@@ -3,6 +3,7 @@ import { DetectionService } from './detection.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { EventsService } from '../events/events.service';
 import { NotFoundException } from '@nestjs/common';
+import * as fs from 'fs';
 import { PluginType } from '@prisma/client';
 
 describe('DetectionService', () => {
@@ -50,6 +51,36 @@ describe('DetectionService', () => {
     service = module.get<DetectionService>(DetectionService);
   });
 
+  afterEach(() => {
+    service.onModuleDestroy();
+    jest.restoreAllMocks();
+  });
+
+  it('rejects missing frames instead of fabricating detections', async () => {
+    await expect(service.runDetectionInference(null, 'RTSP')).rejects.toThrow(
+      'No video frame',
+    );
+    expect(eventsService.recordAndEmitEvent).not.toHaveBeenCalled();
+  });
+
+  it('keeps an empty inference result without fabricating a fallback', async () => {
+    jest.spyOn(fs, 'existsSync').mockReturnValue(true);
+    jest.spyOn(service as any, 'invokeExternalDetector').mockResolvedValue([]);
+    await expect(
+      service.runDetectionInference('/frame.jpg', 'RTSP'),
+    ).resolves.toEqual([]);
+  });
+
+  it('reports a detector failure without emitting invented results', async () => {
+    jest.spyOn(fs, 'existsSync').mockReturnValue(true);
+    jest
+      .spyOn(service as any, 'invokeExternalDetector')
+      .mockRejectedValue(new Error('Python unavailable'));
+    await expect(
+      service.runDetectionInference('/frame.jpg', 'RTSP'),
+    ).rejects.toThrow('YOLO unavailable');
+  });
+
   it('should be defined', () => {
     expect(service).toBeDefined();
   });
@@ -73,6 +104,13 @@ describe('DetectionService', () => {
           }),
       );
 
+      jest.spyOn(service, 'runDetectionInference').mockResolvedValue([
+        {
+          label: 'person',
+          confidence: 0.9,
+          box: { x: 1, y: 2, width: 3, height: 4 },
+        },
+      ]);
       const result = await service.analyzeCamera('user-1', 'cam-ai-1');
 
       expect(prisma.camera.findFirst).toHaveBeenCalledWith({
@@ -138,6 +176,13 @@ describe('DetectionService', () => {
           }),
       );
 
+      jest.spyOn(service, 'runDetectionInference').mockResolvedValue([
+        {
+          label: 'person',
+          confidence: 0.9,
+          box: { x: 1, y: 2, width: 3, height: 4 },
+        },
+      ]);
       const result = await service.analyzeRecording(
         'user-1',
         'cam-ai-1',
@@ -177,4 +222,105 @@ describe('DetectionService', () => {
       ).rejects.toThrow(NotFoundException);
     });
   });
+
+  describe('Automated Detection Mode', () => {
+    beforeEach(() => {
+      jest.spyOn(service, 'runDetectionInference').mockResolvedValue([]);
+    });
+    it('arms detection mode and returns active status when camera is CONNECTED', async () => {
+      prisma.camera.findFirst.mockResolvedValue({
+        id: 'cam-auto-1',
+        ownerId: 'user-1',
+        status: 'CONNECTED',
+        pluginType: PluginType.MOCK,
+      });
+
+      const status = await service.toggleDetectionMode(
+        'user-1',
+        'cam-auto-1',
+        true,
+        3000,
+      );
+
+      expect(status.enabled).toBe(true);
+      expect(status.running).toBe(true);
+      expect(status.intervalMs).toBe(3000);
+
+      const queried = await service.getDetectionStatus('user-1', 'cam-auto-1');
+      expect(queried.enabled).toBe(true);
+      expect(queried.running).toBe(true);
+    });
+
+    it('disarms detection mode cleanly when toggled off', async () => {
+      prisma.camera.findFirst.mockResolvedValue({
+        id: 'cam-auto-1',
+        ownerId: 'user-1',
+        status: 'CONNECTED',
+        pluginType: PluginType.MOCK,
+      });
+
+      await service.toggleDetectionMode('user-1', 'cam-auto-1', true, 4000);
+      const disarmed = await service.toggleDetectionMode(
+        'user-1',
+        'cam-auto-1',
+        false,
+      );
+
+      expect(disarmed.enabled).toBe(false);
+      expect(disarmed.running).toBe(false);
+
+      const queried = await service.getDetectionStatus('user-1', 'cam-auto-1');
+      expect(queried.enabled).toBe(false);
+      expect(queried.running).toBe(false);
+    });
+
+    it('throws NotFoundException when toggling unknown camera', async () => {
+      prisma.camera.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.toggleDetectionMode('user-1', 'cam-unknown', true),
+      ).rejects.toThrow(NotFoundException);
+    });
+  });
+  it('emits selected-zone person notifications with a cooldown', async () => {
+    prisma.camera.findFirst.mockResolvedValue({ id: 'cam-1', name: 'Driveway', status: 'CONNECTED', pluginType: 'RTSP' });
+    const zone = { x: 0, y: 0, width: 0.5, height: 1 };
+    (service as any).detectionStates.set('cam-1', { enabled: true, zone });
+    const inference = jest.spyOn(service, 'runDetectionInference').mockResolvedValue([
+      { label: 'person', confidence: 0.9, box: { x: 1, y: 1, width: 10, height: 10 } },
+    ]);
+    await (service as any).runMonitoringTick('user-1', 'cam-1');
+    await (service as any).runMonitoringTick('user-1', 'cam-1');
+    expect(inference).toHaveBeenCalledWith(null, 'RTSP', zone);
+    expect(eventsService.recordAndEmitEvent).toHaveBeenCalledTimes(1);
+    expect(eventsService.recordAndEmitEvent).toHaveBeenCalledWith('cam-1', 'DETECTION', expect.objectContaining({ zone, cameraName: 'Driveway', eventType: 'PERSON_ENTERED' }));
+    inference.mockResolvedValue([]);
+    await (service as any).runMonitoringTick('user-1', 'cam-1');
+    expect(eventsService.recordAndEmitEvent).toHaveBeenCalledTimes(1);
+    await (service as any).runMonitoringTick('user-1', 'cam-1');
+    expect(eventsService.recordAndEmitEvent).toHaveBeenLastCalledWith('cam-1', 'DETECTION', expect.objectContaining({ eventType: 'PERSON_EXITED', personCount: 0 }));
+    await (service as any).runMonitoringTick('user-1', 'cam-1');
+    expect(eventsService.recordAndEmitEvent).toHaveBeenCalledTimes(2);
+
+  });
+
+  it('does not emit an in-flight result after detection is switched off', async () => {
+    prisma.camera.findFirst.mockResolvedValue({ status: 'CONNECTED', pluginType: 'RTSP' });
+    (service as any).detectionStates.set('cam-1', { enabled: true });
+    let finish!: (value: any) => void;
+    jest.spyOn(service, 'runDetectionInference').mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+    const tick = (service as any).runMonitoringTick('user-1', 'cam-1');
+    await Promise.resolve();
+    await service.toggleDetectionMode('user-1', 'cam-1', false);
+    finish([{ label: 'person', confidence: 0.9, box: { x: 0, y: 0, width: 1, height: 1 } }]);
+    await tick;
+    expect(eventsService.recordAndEmitEvent).not.toHaveBeenCalled();
+  });
+
+  it('rejects a zone outside the video', async () => {
+    prisma.camera.findFirst.mockResolvedValue({ status: 'CONNECTED' });
+    await expect(service.toggleDetectionMode('user-1', 'cam-1', true, 2000,
+      { x: 0.9, y: 0, width: 0.5, height: 1 })).rejects.toThrow('Zone must fit');
+  });
+
 });

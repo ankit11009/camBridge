@@ -1,3 +1,6 @@
+import * as os from 'os';
+import * as dgram from 'dgram';
+import { EventEmitter } from 'events';
 import { Test, TestingModule } from '@nestjs/testing';
 import { OnvifDiscoveryService } from './onvif-discovery.service';
 
@@ -70,10 +73,41 @@ describe('OnvifDiscoveryService', () => {
   });
 
   describe('discover', () => {
-    it('handles discovery timeout and returns array without unhandled errors', async () => {
-      // Short timeout of 100ms for unit test
-      const results = await service.discover(100);
-      expect(Array.isArray(results)).toBe(true);
+    afterEach(() => { jest.restoreAllMocks(); jest.useRealTimers(); });
+
+    it('scans each interface, retries, handles multiple matches, and deduplicates', async () => {
+      jest.useFakeTimers();
+      jest.spyOn(os, 'networkInterfaces').mockReturnValue({
+        ethernet: [{ address: '192.168.1.2', family: 'IPv4', internal: false } as any],
+        wifi: [{ address: '192.168.2.2', family: 'IPv4', internal: false } as any],
+      });
+      const sockets: any[] = [];
+      jest.spyOn(dgram, 'createSocket').mockImplementation(() => {
+        const socket = Object.assign(new EventEmitter(), {
+          bind: jest.fn((_port, _address, callback) => callback()),
+          setMulticastInterface: jest.fn(), setMulticastTTL: jest.fn(), setMulticastLoopback: jest.fn(),
+          send: jest.fn((_buf, _port, _host, callback) => callback(null)), close: jest.fn(),
+        });
+        sockets.push(socket);
+        return socket as any;
+      });
+      const pending = service.discover(2500);
+      const match = (id: string) => `<d:ProbeMatch><a:Address>${id}</a:Address><d:XAddrs>http://192.168.1.20/onvif/device_service</d:XAddrs></d:ProbeMatch>`;
+      sockets[0].emit('message', Buffer.from(`<d:ProbeMatches>${match('one')}${match('two')}</d:ProbeMatches>`), { address: '192.168.1.20' });
+      sockets[1].emit('message', Buffer.from(match('one')), { address: '192.168.1.20' });
+      await jest.advanceTimersByTimeAsync(2500);
+      expect(await pending).toHaveLength(2);
+      expect(sockets).toHaveLength(2);
+      expect(sockets[1].setMulticastInterface).toHaveBeenCalledWith('192.168.2.2');
+      for (const socket of sockets) {
+        expect(socket.send).toHaveBeenCalledTimes(2);
+        expect(socket.close).toHaveBeenCalledTimes(1);
+      }
+    });
+
+    it('reports unavailable network instead of a successful empty scan', async () => {
+      jest.spyOn(os, 'networkInterfaces').mockReturnValue({});
+      await expect(service.discover()).rejects.toThrow('No active IPv4');
     });
   });
 });

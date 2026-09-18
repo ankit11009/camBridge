@@ -1,0 +1,22 @@
+import { afterEach, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { DiscoverModal } from './DiscoverModal';
+import { camerasApi } from '../api/cameras.api';
+vi.mock('../api/cameras.api', () => ({ camerasApi: { discover: vi.fn(), create: vi.fn(), connect: vi.fn() } }));
+afterEach(() => { cleanup(); vi.clearAllMocks(); });
+it('scans on opening and adds and connects a discovered ONVIF camera', async () => {
+  vi.mocked(camerasApi.discover).mockResolvedValue([{ id: 'device', name: 'Door', address: 'http://192.168.1.20/onvif/device_service' }]);
+  vi.mocked(camerasApi.create).mockResolvedValue({ id: 'camera' } as any);
+  vi.mocked(camerasApi.connect).mockResolvedValue({ id: 'camera', status: 'CONNECTED' });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(<QueryClientProvider client={client}><DiscoverModal isOpen onClose={() => {}} /></QueryClientProvider>);
+  await screen.findByText('Door');
+  fireEvent.change(screen.getByLabelText('ONVIF username'), { target: { value: 'operator' } });
+  fireEvent.change(screen.getByLabelText('ONVIF password'), { target: { value: 'test-pass' } });
+  fireEvent.click(screen.getByText('Add and Connect'));
+  await waitFor(() => expect(camerasApi.connect).toHaveBeenCalledWith('camera'));
+  expect(camerasApi.create).toHaveBeenCalledWith(expect.objectContaining({ pluginType: 'ONVIF', connectionConfig: expect.objectContaining({ username: 'operator', password: 'test-pass', deviceUrl: 'http://192.168.1.20/onvif/device_service' }) }));
+  await screen.findByText('Added');
+  client.clear();
+});
