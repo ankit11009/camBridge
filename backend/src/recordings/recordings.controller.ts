@@ -121,7 +121,7 @@ export class RecordingsController {
       res.setHeader('Content-Range', `bytes ${start}-${end}/${fileSize}`);
       res.setHeader('Content-Length', chunksize);
 
-      fileStream.on('error', (err) => {
+      fileStream.on('error', () => {
         if (!res.headersSent) {
           res.status(HttpStatus.INTERNAL_SERVER_ERROR).send();
         }
@@ -137,7 +137,7 @@ export class RecordingsController {
       res.setHeader('Content-Length', fileSize);
       const fileStream = fs.createReadStream(filePath);
 
-      fileStream.on('error', (err) => {
+      fileStream.on('error', () => {
         if (!res.headersSent) {
           res.status(HttpStatus.INTERNAL_SERVER_ERROR).send();
         }
